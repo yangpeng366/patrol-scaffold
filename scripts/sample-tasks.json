@@ -1,0 +1,44 @@
+[
+  {
+    "id": "demo-A",
+    "title": "示例项目A-紧急",
+    "repoPath": "D:\\gitAll\\demo-a",
+    "description": "演示 P0 高优先，interval=0 视为每轮到期",
+    "nextStep": "跑通 dry-run",
+    "priority": "P0",
+    "intervalMin": 0,
+    "threadId": null,
+    "fake": false,
+    "lastRun": "2026-09-12T22:21:02.2918714+08:00",
+    "currentStage": "完成(dry-run)",
+    "achievement": "dry-run: 模拟完成 [示例项目A-紧急] 的一轮有界工作（仓库 D:\\gitAll\\demo-a；下一步: 跑通 dry-run）"
+  },
+  {
+    "id": "demo-B",
+    "title": "示例项目B-常规",
+    "repoPath": "D:\\gitAll\\demo-b",
+    "description": "演示 P2，1440 分钟间隔",
+    "nextStep": "等下一轮",
+    "priority": "P2",
+    "intervalMin": 1440,
+    "threadId": null,
+    "fake": false,
+    "lastRun": "2026-09-12T22:21:03.5536664+08:00",
+    "currentStage": "完成(dry-run)",
+    "achievement": "dry-run: 模拟完成 [示例项目B-常规] 的一轮有界工作（仓库 D:\\gitAll\\demo-b；下一步: 等下一轮）"
+  },
+  {
+    "id": "demo-C",
+    "title": "示例项目C-中等",
+    "repoPath": "D:\\gitAll\\demo-c",
+    "description": "演示 P1",
+    "nextStep": "推进中",
+    "priority": "P1",
+    "intervalMin": 0,
+    "threadId": null,
+    "fake": false,
+    "lastRun": "2026-09-12T22:21:02.3079976+08:00",
+    "currentStage": "完成(dry-run)",
+    "achievement": "dry-run: 模拟完成 [示例项目C-中等] 的一轮有界工作（仓库 D:\\gitAll\\demo-c；下一步: 推进中）"
+  }
+]

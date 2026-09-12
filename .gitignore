@@ -1,0 +1,4 @@
+# 巡检脚手架运行时产物（dry-run 生成，不入仓）
+scripts/downloads/
+scripts/memory/
+*.zip
