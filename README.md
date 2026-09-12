@@ -29,6 +29,19 @@
 - **飞书（在用）**：provider=`bitable`，`lark-cli base` 读项目方向表 → 派发 `codex exec` → 回写 Bitable。
 - **腾讯文档**：provider=`tencent-docs`，智能表格行 1:1 映射同一 item 契约，下游全不变。
 
+## 其他 Agent 快速上手（先跑通命令行再谈架构）
+
+拿到这套 skill 后，**第一步**是 dry-run 验证链路在你的机器上能通（实测为准，无凭据无网络）：
+
+```powershell
+cd scripts
+pwsh -File patrol-loop.ps1 -TasksFile sample-tasks.json -Once -DryRun
+```
+
+预期：`due=3/3`，三个 worker 完成，`sample-tasks.json` 的 `lastRun` 被回写，digest 落在 `downloads/patrol-<ts>.json|.md`。立即重跑：`due=0/3`（证 per-row interval 过滤生效）。
+
+跑不通先修 pwsh / 路径——链路跑不通之前，架构读了也白读。跑通后再读 `references/patrol-blueprint.md` 理解架构、`references/local-json-adapter.md` 换真实数据源。
+
 ## 安装
 
 ```bash

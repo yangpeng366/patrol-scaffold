@@ -11,6 +11,25 @@ can drive 腾讯文档智能表格 / Sheets / local JSON tomorrow. Use this to s
 new patrol loop for any recurring "read a task list -> bounded agent work ->
 report" need without re-deriving the architecture.
 
+## Quick start for other agents (run this FIRST)
+
+Before reading further or swapping anything, verify the scaffold runs on your
+machine — no credentials, no network:
+
+```
+cd <skill-dir>/scripts
+pwsh -File patrol-loop.ps1 -TasksFile sample-tasks.json -Once -DryRun
+```
+
+Expected: `due=3/3`, three workers complete, `sample-tasks.json` gets `lastRun`
+written back, digest lands in `downloads/patrol-<ts>.json|.md`. Immediate
+re-run shows `due=0/3` (per-row interval filter confirmed).
+
+If this fails, fix your pwsh / dot-source path FIRST — the scaffold is
+meaningless until the pipeline runs end-to-end. Then read
+`references/patrol-blueprint.md` for architecture and
+`references/local-json-adapter.md` to swap in your real data source.
+
 ## When to use (instantiate a new patrol)
 
 - The need is recurring (daily / per-interval), not one-off.
