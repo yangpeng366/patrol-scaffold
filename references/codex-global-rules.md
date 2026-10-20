@@ -1,4 +1,4 @@
-<!-- 参考资料快照（2026-09-12 抄录） -->
+<!-- 参考资料快照（2026-10-20 抄录） -->
 <!-- 活文件为准：E:\AI-Portable\codex-home\AGENTS.md（权威源，落地前请重读活文件） -->
 <!-- 本件为离线学习/巡检脚手架上下文而抄；规约有重大变更时需同步。 -->
 # Codex 全局规约
@@ -179,3 +179,16 @@ Codex 推数入多维表格，**`lark-cli base +record-batch-create --as user`**
 - 思亦可隐，善启发、戒冗陈，毋徒耗 token。
 
 此启发之策，非死律；显隐之度，因事而裁。
+
+## 十四、OpenCode 委派
+
+本机已装 OpenCode（`E:\npm-global`），并配 `opencode-zen` 免费层（`nemotron-3-ultra-free` 等，零成本）。技能 `opencode-run-silent` 可静默、非交互执行（`opencode run --format json --auto` + 解析 + 超时清理）。
+
+**可委 OpenCode 者**：免费额度可及、难度低、意图明、改动清之务——单文件小改、格式化、样板生成、简单代码生成、明确之查替、低难巡检。
+
+**毋委者**：高难架构、需深推理、跨多处依赖、或安求严之务，仍由 codex 主模型担。
+
+**自决之度**：何务委 OpenCode、何务留 codex，由尔（AI）裁之；委之者，省主模型额度，工毕验实。
+## 十五、防断流
+
+网络不稳或单次输出大（>3 KB）时，勿一次写完。用 `TextFile.ps1` 分段：`Set-TextFile` 首段，`Add-TextFile` 逐节追加（每次 ≤20 行）。过程简报用文言短句（"次节毕"），省 token 降断流。写毕验 BOM。
