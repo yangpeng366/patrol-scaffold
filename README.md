@@ -42,7 +42,7 @@ pwsh -File adapter-contract-test.ps1      # 契约自测：适配器装配 + 每
 pwsh -File patrol-loop.ps1 -TasksFile sample-tasks.json -Once -DryRun
 ```
 
-预期：契约自测 `pass=1 skip=1 fail=0`（bitable 无凭据时为 SKIP 而非 FAIL）；
+预期：契约自测 `pass=1 skip=2 fail=0`（bitable / tencent-docs 无凭据时为 SKIP 而非 FAIL）；
 `due=3/3`，三个 worker 完成，`sample-tasks.json` 的 `lastRun` 被回写，digest 落在
 `downloads/patrol-<ts>.json|.md`。立即重跑：`due=0/3`（证 per-row interval 过滤生效）。
 
@@ -67,8 +67,11 @@ pwsh -File patrol-loop.ps1 -TasksFile sample-tasks.json -Once -DryRun
 - `references/patrol-blueprint.md` — 全架构 + 真实参数 + 两种落地 + 13 步迁移清单 + 踩坑
 - `schemas/item.schema.json` — item 契约唯一事实源
 - `adapters/*.adapter.json` — provider 声明式描述（模块 / 配置 / 契约函数）
+- `adapters/tencent-docs.adapter.json` + `scripts/tencent-docs-adapter.ps1` — 腾讯文档智能表格（第二类真实适配器）
 - `scripts/patrol-provider.ps1` — 适配器装配层（导入、归一、调用）
 - `scripts/adapter-contract-test.ps1` — 适配器契约自测（离线校验器）
+- `tests/verify-tencent-docs-adapter.ps1` — tencent-docs 端到端自测（本地 mock 服务，无需真凭据）
+- `docs/tencent-docs-adapter.md` — tencent-docs 的 11 节适配器规格与落地待办
 - `references/external-dependencies.md` — 外部依赖索引（权威源 / 取法 / 降级），**不随仓分发**
 - `references/scheduled-task-recipe.md` — 触发器层注册 recipe
 

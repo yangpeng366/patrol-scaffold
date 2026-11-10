@@ -65,19 +65,14 @@ function Import-PatrolProvider {
     if (-not (Test-Path -LiteralPath $modulePath)) {
         throw "Import-PatrolProvider: adapter module not found: $modulePath"
     }
+    $beforeFns = @(Get-ChildItem -Path function: | Select-Object -ExpandProperty Name)
     . $modulePath
+    $afterFns = @(Get-ChildItem -Path function: | Select-Object -ExpandProperty Name)
     # dot-source 发生在函数作用域，函数会随本函数退出而消失——须提升到脚本作用域，
     # 否则返回后 Get-PatrolProviderItems 找不到契约函数。
-    $fnNames = @()
-    foreach ($slot in @('listItems', 'writeBack', 'resolveName')) {
-        $spec0 = $d.$slot
-        if ($spec0 -and $spec0.function) { $fnNames += [string]$spec0.function }
-    }
-    if ($d.optional) {
-        foreach ($prop in $d.optional.PSObject.Properties) {
-            if ($prop.Value -and $prop.Value.function) { $fnNames += [string]$prop.Value.function }
-        }
-    }
+    # 模块的辅助函数与契约函数都可能在契约函数内部被调用，因此整批提升，
+    # 不只提升 listItems/writeBack/resolveName 三个入口。
+    $fnNames = @($afterFns | Where-Object { $beforeFns -notcontains $_ })
     foreach ($fnName in ($fnNames | Select-Object -Unique)) {
         $cmd = Get-Command -Name $fnName -CommandType Function -ErrorAction SilentlyContinue
         if ($cmd) { Set-Item -Path ("function:script:{0}" -f $fnName) -Value $cmd.ScriptBlock }

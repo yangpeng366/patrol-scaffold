@@ -1,0 +1,28 @@
+{
+  "provider": "tencent-docs",
+  "title": "腾讯文档智能表格（Smartsheet 记录）",
+  "module": "scripts/tencent-docs-adapter.ps1",
+  "kind": "api",
+  "needsCredentials": true,
+  "needsNetwork": true,
+  "description": "用腾讯文档开放平台 Smartsheet 记录接口读行并归一为 item（分页、按列标题取值、可按视图与阶段过滤）；写回受 config.syncBack 与显式 syncBack 双重门控制，默认零远端写入，仅落本地镜像。",
+  "config": {
+    "configPath": "",
+    "mirrorFile": "state/tencent-docs-mirror.json",
+    "syncBack": "false"
+  },
+  "listItems": {
+    "function": "Get-PatrolItems",
+    "args": { "ConfigPath": "${configPath}" }
+  },
+  "writeBack": {
+    "function": "Save-PatrolItems",
+    "args": {
+      "TasksFile": "${mirrorFile}",
+      "ConfigPath": "${configPath}",
+      "SyncBack": "${syncBack}"
+    }
+  },
+  "resolveName": { "function": "Resolve-ItemName", "args": {} },
+  "optional": {}
+}
