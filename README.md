@@ -164,7 +164,11 @@ args 里的 `${...}` 占位能在 `config` 中解析（`${tasksFile}` 例外，�
 Expand-Archive -LiteralPath patrol-scaffold-0.2.0.zip -DestinationPath $env:TEMP\rel
 Copy-Item -Recurse -Force $env:TEMP\rel\patrol-scaffold-0.2.0 "$env:CODEX_HOME\skills\patrol-scaffold"
 
-# 升级：停触发器 -> 备份 state/patrol-state.json -> 只换代码文件 -> 跑 dry-run
+# 装完先证「装对了」：安装目录 vs 本仓 HEAD 逐文件 SHA256
+#   （缺文件 / 内容漂移 / BOM / 多余源码文件 / 不可读 → exit 1 并点名；运行时产物不算漂移也不删）
+pwsh -NoProfile -File tests/verify-install-drift.ps1 -InstalledPath "$env:CODEX_HOME\skills\patrol-scaffold"
+
+# 升级：停触发器 -> 备份 state/patrol-state.json -> 只换代码文件 -> 跑 dry-run -> 再跑一次上面那条
 #       state/ downloads/ reports/ memory/ 与仓外配置不属于发布物，不要覆盖
 
 # 打包（产物落 %TEMP%，不入仓；脚本自带归档自证）
@@ -172,14 +176,14 @@ pwsh -NoProfile -File scripts/build-release.ps1 -IncludeUntracked
 ```
 
 安装后，任何会话遇到 recurring 巡检需求时调用 `patrol-scaffold` skill 即可拿到蓝图。
-完整流程（八道本地门禁的期望输出、归档校验清单、可复现口径、升级与回滚）见 `docs/releasing.md`。
+完整流程（十道本地门禁的期望输出、归档校验清单、可复现口径、安装后自检、升级与回滚）见 `docs/releasing.md`。
 发布物结构、`SHA256SUMS.txt` 的用法与 tag 约定也在那一页。
 
 ## 文件
 
 - `VERSION` — 版本唯一事实源（`0.2.0`，无 `v` 前缀；tag 才带 `v`）
 - `CHANGELOG.md` — 变更说明（Added / Changed / Fixed / Known limits，按版本分节）
-- `docs/releasing.md` — 发布手册：八道本地门禁与期望输出、打包与归档校验、安装 / 升级 / 回滚、SKIP 政策
+- `docs/releasing.md` — 发布手册：十道本地门禁与期望输出、打包与归档校验、安装后自检（§3.1）、安装 / 升级 / 回滚、SKIP 政策
 - `scripts/build-release.ps1` — 可复现打包 + 归档自证（清单 / 逐条哈希 / 禁入模式 / HEAD-blob 排除用户改动 / 产物密钥扫描）
 - `SKILL.md` — 入口（七层架构 + 适配器契约 + 安全边界）
 - `references/adapter-spec.md` — **加一个数据源的填表式模板（11 节）**
@@ -204,6 +208,7 @@ pwsh -NoProfile -File scripts/build-release.ps1 -IncludeUntracked
 - `references/scheduled-task-recipe.md` — 触发器层注册 recipe
 - `tests/verify-no-secrets.ps1` — 密钥卫生门禁：扫全部受控文件，命中即非零退出
 - `tests/verify-provider-isolation.ps1` — 多 provider 同进程同名函数不串味（装配层回归）
+- `tests/verify-install-drift.ps1` — **安装漂移门禁**：已安装 skill 与仓库 HEAD 逐文件 SHA256（缺文件 / 内容漂移 / BOM / 多余源码文件 / 不可读均 `exit 1` 并点名；`downloads/` `memory/` `notify.log` 等运行时产物不误报也不删除）；带 14 条自证，装完 / 升完跑一次
 - `tests/verify-secret-history.ps1` — 历史密钥盘点：只报告命中提交，不改历史
 - `.githooks/pre-commit` — 把门禁挂到提交前：`git config core.hooksPath .githooks`
 - `.github/workflows/verify.yml` — CI（windows-latest / shell: pwsh）：描述文件规格漂移 + 全 provider 契约自测 + 跨仓 item 契约同源（静态 schema + 动态解析对拍）+ csv-file 离线自测 + command 离线自测 + 密钥卫生 + 发布归档自证（归档落 `RUNNER_TEMP`，不进工作树）

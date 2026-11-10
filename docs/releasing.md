@@ -25,7 +25,7 @@
 
 ---
 
-## 1. 发布前门禁（九条，全绿才算候选）
+## 1. 发布前门禁（十条，全绿才算候选）
 
 在仓库根执行，全部要求 **PowerShell 7（pwsh）**、离线、不读凭据：
 
@@ -46,6 +46,13 @@ pwsh -NoProfile -File tests/verify-no-secrets.ps1
 pwsh -NoProfile -File tests/verify-state-externalization.ps1
 ```
 
+外加安装漂移自检（自证段进 CI；给了 `-InstalledPath` 就是对本机安装的实检，见 §3.1）：
+
+```powershell
+pwsh -NoProfile -File tests/verify-install-drift.ps1                                          # 只跑自证段
+pwsh -NoProfile -File tests/verify-install-drift.ps1 -InstalledPath "$env:CODEX_HOME\skills\patrol-scaffold"   # 实检
+```
+
 ### 1.1 期望输出（0.2.0 实测，2026-11-11，pwsh 7.6.5 / windows）
 
 | 命令 | 判定行 | 判红标准 |
@@ -59,6 +66,7 @@ pwsh -NoProfile -File tests/verify-state-externalization.ps1
 | `verify-command-adapter.ps1` | `summary pass=45 fail=0` | `fail>0` |
 | `verify-no-secrets.ps1` | `summary pass=12 fail=0 skip=0 hits=0` | `fail>0` 或 `hits>0` |
 | `verify-state-externalization.ps1` | `state externalization: PASS` | 任意断言 FAIL |
+| `verify-install-drift.ps1` | `summary selftest pass=14 fail=0` + `RESULT: PASS`；实检时另加 `summary checked=<N> ok=<N> fail=0` | `selftest fail>0`，或实检 `fail>0`（缺文件 / content / bom / extra / unreadable 任一） |
 
 `adapter-contract-test` 的 `pass=3 skip=2` 是本版**正常**结果，不是缺陷：`command` / `csv-file` /
 `local-json` 实跑，`bitable` / `tencent-docs` 因无凭据 SKIP。SKIP 的判据、覆盖缺口与否决条件见 §5。
@@ -157,6 +165,39 @@ Copy-Item -Recurse -Force $env:TEMP\rel\patrol-scaffold-0.2.0 "$env:CODEX_HOME\s
 目录里**没有** `state/`、`downloads/`、`reports/`、`memory/`——它们分别是运行态、产出与记忆库，
 首次运行自动创建。这也意味着**升级时不能拿发布包覆盖它们**。
 
+### 3.1 装完 / 升完必须跑一次安装漂移自检
+
+「拷过去了」不等于「装对了」：漏掉新增文件、拿到旧版内容、编辑器加了 BOM、把本地实验脚本一起
+拷进 skill 目录，都不会自己报错。用下面这条命令把它变成会红的事实：
+
+```powershell
+pwsh -NoProfile -File <repo>\tests\verify-install-drift.ps1 `
+  -RepoRoot <repo> -InstalledPath "$env:CODEX_HOME\skills\patrol-scaffold"
+```
+
+- **PASS 判定**：`summary checked=<N> ok=<N> fail=0` + `RESULT: PASS`（`N` = HEAD 受控文件数，本版为 53；
+  少装一个文件会变成 `missing` 并 `fail=1`）。
+- **`exit 1`**：有漂移，逐条 `[FAIL] <kind> <path>` 点名。`kind` 只有六种：`missing`（缺文件）、
+  `not-a-file`（该是文件却是目录）、`content`（内容漂移；detail 会注明是否仅换行符差异）、
+  `bom`（UTF-8 BOM 与 HEAD 不一致）、`extra`（多出的受控/源码文件）、`unreadable`（打不开）。
+- **`exit 2`**：用法/环境错误（不是 git 仓、安装目录不存在、`-InstalledPath` 指到了仓库本身）。
+
+口径写死，不靠约定：
+
+- 基准是 **HEAD blob**（`git ls-tree -r HEAD` 的普通文件），**不是工作区字节**——`scripts/sample-tasks.json`
+  的用户未提交改动既不算漂移，也不会被本脚本读写；发布物同样取自 HEAD。
+- 安装目录允许保留运行时产物：`downloads/`、`memory/`、`state/`、`reports/`、`*.log`（含 `notify.log`）、
+  `patrol-state.json`、`command-mirror.json`、`SHA256SUMS.txt`。它们不计入漂移，**也不会被删除**——
+  自检对安装目录只读，不做任何复制/删除/回写。
+- 本地扩展（例如 `tests/verify-bitable-adapter.ps1`、`references/textfile-helper.md`）会被报 `extra`，
+  这是预期行为：本地扩展应放仓外；确需纳入/忽略用 `-ExcludePath 'tests/verify-bitable-adapter.ps1'`，
+  或给一份完整受控清单 `-ManifestFile <清单>`（一行一个相对路径，`#` 开头为注释；给了清单就**不再**
+  从 HEAD 推导，清单外的文件按 `extra` 报）。
+- 自证段（不带 `-InstalledPath` 时只跑它，CI 跑的就是这个）用 %TEMP% 里现造的 git 仓断言 14 条：
+  干净副本 PASS、篡改一个字节 FAIL 且点名、缺文件 FAIL 且点名、运行态多余文件不误报且不被删除、
+  多余源码文件 FAIL、BOM 报出、工作区脏但安装==HEAD 仍 PASS、不可读文件 FAIL 且句柄释放后恢复 PASS、
+  显式清单生效、`-ExcludePath` 生效、CRLF/LF 差异能点名。
+
 ---
 
 ## 4. 升级
@@ -174,6 +215,10 @@ Copy-Item <skill-dir>\state\patrol-state.json <备份目录>\patrol-state-<日�
 # 4) 校验版本与门禁
 Get-Content <skill-dir>\VERSION
 pwsh -NoProfile -File <skill-dir>\scripts\adapter-contract-test.ps1
+
+# 4b) 逐文件比对：安装目录 vs 本仓 HEAD（缺文件 / 漂移 / BOM / 多余源码文件全在这里现形）
+pwsh -NoProfile -File <repo>\tests\verify-install-drift.ps1 `
+  -RepoRoot <repo> -InstalledPath <skill-dir>
 
 # 5) 跑一次 dry-run + 恢复触发器
 ```

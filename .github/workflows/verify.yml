@@ -1,10 +1,10 @@
 name: verify
 
-# 门槛只做八件事：描述文件规格漂移、契约自测（每个 provider 过同一把尺子）、停跑调度语义（intervalMin
+# 门槛只做九件事：描述文件规格漂移、契约自测（每个 provider 过同一把尺子）、停跑调度语义（intervalMin
 # 为 0 / 空 / 负数不进 due，防止已停项目被每 60 分钟唤醒）、csv-file 离线自测、
 # command 离线自测（mock 命令，无凭据无网络，CI 可真跑）、跨仓 item 契约同源校验（兄弟仓 dsh-patrol
-# 稀疏 checkout 后真跑，不再是 SKIP）、密钥卫生、发布归档自证（内容清单 / 逐条哈希 / 禁入模式 /
-# 用户改动排除 / 产物密钥扫描）。
+# 稀疏 checkout 后真跑，不再是 SKIP）、安装漂移自检的自证段、密钥卫生、发布归档自证（内容清单 /
+# 逐条哈希 / 禁入模式 / 用户改动排除 / 产物密钥扫描）。
 # 除「稀疏 checkout 公开兄弟仓 yangpeng366/dsh-patrol 的 schemas/」这一条取数动作外，全部离线：
 # 不装依赖、不跑网络用例、不需要任何 secret（公开仓用默认 GITHUB_TOKEN 即可）。
 
@@ -54,6 +54,15 @@ jobs:
         run: |
           $releaseDir = Join-Path $env:RUNNER_TEMP 'release'
           pwsh -NoProfile -File scripts/build-release.ps1 -OutputDirectory $releaseDir
+
+      # 安装漂移门禁的自证段：%TEMP% 里现造 git 仓，断言干净副本 PASS / 篡改一字节 FAIL 并点名 /
+      # 缺文件 FAIL / 运行态文件不误报不删除 / BOM 报出 / 以 HEAD 为基准（工作区脏不算漂移）/ 不可读 FAIL。
+      # 这里不拿发布归档当「安装目录」实检：本门禁基准是 HEAD blob（逐字节），而 windows-latest 的
+      # core.autocrlf 可能把工作区与归档写成 CRLF，两者天然不等；实检是运维动作，命令见
+      # docs/releasing.md §3.1（在 HEAD 字节的干净副本上实测 checked=53 ok=53 fail=0）。
+      - name: Install drift gate (self-test)
+        shell: pwsh
+        run: pwsh -NoProfile -File tests/verify-install-drift.ps1
 
       # 跨仓同源校验（真闸门，两条）：
       # 1) 静态：两份 schemas/item.schema.json 逐键等价；

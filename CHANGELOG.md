@@ -15,6 +15,24 @@
 
 ### Added
 
+- **`tests/verify-install-drift.ps1`：安装后 / 升级后的哈希漂移门禁**。此前 skill 同步完只能手工核哈希：
+  漏装新文件、拿到旧版内容、编辑器加 BOM、把本地实验脚本一起拷进 skill 目录，都不会有人报错。现在一条
+  命令把「已安装 skill 与仓库受控文件一致」变成会红的事实：`-InstalledPath <已安装目录>` 逐文件比 SHA256，
+  基准是 **HEAD blob**（`git ls-tree -r HEAD`）而不是工作区字节——`scripts/sample-tasks.json` 的用户未提交
+  改动既不算漂移、也不会被读或写；缺文件 / 类型不对 / 内容漂移 / UTF-8 BOM / 不可读 / 多出的受控或源码
+  文件全部点名并 `exit 1`（`exit 2` 留给用法错误）。安装目录的运行时产物（`downloads/`、`memory/`、
+  `state/`、`reports/`、`*.log`（含 `notify.log`）、`patrol-state.json`、`command-mirror.json`、
+  `SHA256SUMS.txt`）不计数也不删除——自检对安装目录只读。参数：`-RepoRoot`（仓路径）、`-InstalledPath`
+  （已安装目录）、`-ManifestFile`（完整受控清单，给了一份就覆盖 HEAD 推导）、`-ExcludePath`（通配排除）、
+  `-NoSelfTest`。
+- **该脚本自带 14 条自证**（%TEMP% 现造真 git 仓 + 6 个受控文件，其中一份模仿 `scripts/sample-tasks.json`）：
+  干净副本 PASS、篡改一个字节 FAIL 且点名、缺文件 FAIL 且点名、运行态多余文件不误报且一个没少、多余源码
+  文件 FAIL、BOM 报出（`kind=bom`，不是含糊的 content）、工作区脏但安装 == HEAD 仍 PASS（证明以 HEAD 为基
+  准）、不可读文件 FAIL 且句柄释放后恢复 PASS、显式清单生效、`-ExcludePath` 生效、CRLF/LF 差异仍判红但
+  detail 点明换行符。无 `-InstalledPath` 时只跑自证段（CI 跑的就是这个），`summary selftest pass=14 fail=0`。
+- **门禁入口已挂上**：`.github/workflows/verify.yml` 新增 `Install drift gate (self-test)`；
+  `docs/releasing.md` §1 门禁清单第 10 条 + 新增 §3.1「装完 / 升完必须跑一次安装漂移自检」（含退出码与
+  六类 `kind` 的口径）、§4 升级步骤 4b；`README.md` 安装段与文件清单同步。
 - **`tests/verify-item-parity-e2e.ps1`**：跨仓端到端对拍。7 条 fixture 行（正常 / 缺 `巡检间隔(分钟)` /
   间隔 `0` / 优先级 `P3` / 假数据 `true` / 字符串 `"true"` / 空白与小数间隔）同时喂本仓
   `BitAbleAdapter.ps1::Convert-BitableRowToItem` 与 dsh-patrol 的 `bitable.ts` + `provider.ts`；逐字段
