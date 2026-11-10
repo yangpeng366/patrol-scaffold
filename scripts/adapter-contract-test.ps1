@@ -87,16 +87,68 @@ function Test-PatrolItemSchema {
 }
 
 $adapterDir = Join-Path $repoRoot 'adapters'
-$descriptors = @(Get-ChildItem -LiteralPath $adapterDir -Filter '*.adapter.json' | Sort-Object Name)
-if ($Provider) { $descriptors = @($descriptors | Where-Object { $_.BaseName -like "$Provider*" }) }
-if ($descriptors.Count -eq 0) { throw "no adapter descriptor found under $adapterDir" }
+if (-not (Test-Path -LiteralPath $adapterDir)) { throw "adapter dir not found: $adapterDir" }
+$allDescriptors = @(Get-ChildItem -LiteralPath $adapterDir -Filter '*.adapter.json' | Sort-Object Name)
+if ($allDescriptors.Count -eq 0) { throw "no adapter descriptor (*.adapter.json) found under $adapterDir" }
+
+$descriptors = $allDescriptors
+if ($Provider) {
+    # 单 provider 用法兼容：先文件名精确匹配，再退回前缀匹配（老习惯 -Provider bit）
+    $exact = @($allDescriptors | Where-Object { ($_.BaseName -replace '\.adapter$', '') -eq $Provider })
+    if ($exact.Count -eq 0) { $exact = @($allDescriptors | Where-Object { $_.BaseName -like "$Provider*" }) }
+    if ($exact.Count -eq 0) {
+        $known = (@($allDescriptors | ForEach-Object { $_.BaseName -replace '\.adapter$', '' }) -join ', ')
+        Write-Host ("[FAIL] provider '{0}'：adapters/ 下没有对应描述文件（已知 provider：{1}）" -f $Provider, $known)
+        exit 1
+    }
+    $descriptors = $exact
+}
+
+$selected = (@($descriptors | ForEach-Object { $_.BaseName -replace '\.adapter$', '' }) -join ', ')
+if (-not $Quiet) {
+    Write-Host ("adapters: {0} 个 provider（{1}）" -f $descriptors.Count, $selected)
+}
 
 $results = @()
 foreach ($file in $descriptors) {
     $name = $file.BaseName -replace '\.adapter$', ''
     $status = 'PASS'; $detail = ''; $count = 0; $errors = @()
+    $moduleRel = ''
     try {
+        # 描述文件与磁盘的一致性先查：模块缺失/键名不对要在装配前点名，不能等装配抛个含糊的错。
+        # 注意：这几项与凭据无关，所以不能因为 needsCredentials 就 SKIP 掉（坏描述文件必须红）。
+        $descriptorText = [System.IO.File]::ReadAllText($file.FullName, [System.Text.UTF8Encoding]::new($false))
+        $descriptor = $descriptorText | ConvertFrom-Json
+        if ([string]$descriptor.provider -and [string]$descriptor.provider -ne $name) {
+            throw "描述文件 provider='$($descriptor.provider)' 与文件名 '$($file.Name)' 不一致（装配按文件名找模块）"
+        }
+        $moduleRel = [string]$descriptor.module
+        if (-not $moduleRel) { throw '描述文件缺 module 字段（找不到适配器模块）' }
+        $moduleFull = Join-Path $repoRoot ($moduleRel -replace '/', '\')
+        if (-not (Test-Path -LiteralPath $moduleFull -PathType Leaf)) {
+            throw "适配器模块不存在：$moduleRel（解析为 $moduleFull）"
+        }
+
         $p = Import-PatrolProvider -Provider $name -Values @{ tasksFile = $TasksFile }
+
+        # 缺函数必须点名报错：三个必选槽 + optional 里的能力型函数（后者只会在运行到该能力时才炸）
+        foreach ($slot in @('listItems', 'writeBack', 'resolveName')) {
+            $slotFn = [string]$p.Descriptor.$slot.function
+            if (-not $slotFn) { throw "描述文件缺 $slot.function（契约函数必须点名）" }
+            if (-not (Get-Command -Name $slotFn -CommandType Function -ErrorAction SilentlyContinue)) {
+                throw "模块 $moduleRel 未定义 $slot.function '$slotFn'（契约不满足）"
+            }
+        }
+        if ($p.Descriptor.optional) {
+            foreach ($optProp in $p.Descriptor.optional.PSObject.Properties) {
+                $optFn = [string]$optProp.Value.function
+                if (-not $optFn) { throw "描述文件 optional.$($optProp.Name).function 为空" }
+                if (-not (Get-Command -Name $optFn -CommandType Function -ErrorAction SilentlyContinue)) {
+                    throw "模块 $moduleRel 未定义 optional.$($optProp.Name) 声明的函数 '$optFn'（到了该能力才炸的坑，这里提前报）"
+                }
+            }
+        }
+
         $needsCred = [bool]$p.Descriptor.needsCredentials
         $cfgPath = [string]$p.Values.configPath
         if ($needsCred -and -not $cfgPath) {
@@ -119,8 +171,11 @@ foreach ($file in $descriptors) {
     } catch {
         $status = 'FAIL'; $detail = $_.Exception.Message
     }
+    if ($moduleRel) {
+        if ($detail) { $detail = "$detail  module=$moduleRel" } else { $detail = "module=$moduleRel" }
+    }
     $results += [pscustomobject]@{
-        provider = $name; status = $status; items = $count; detail = $detail; errors = @($errors)
+        provider = $name; status = $status; items = $count; detail = $detail; module = $moduleRel; errors = @($errors)
     }
     if (-not $Quiet) {
         Write-Host ("[{0}] {1}  {2}" -f $status, $name, $detail)

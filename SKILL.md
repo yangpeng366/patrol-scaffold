@@ -1,7 +1,6 @@
----
-name: patrol-scaffold
-description: Reusable provider-agnostic blueprint for scheduled "patrol" automations. Read work items from a row-based source (Feishu Bitable, 腾讯文档智能表格, Google Sheets, or local JSON), dispatch a bounded Codex worker per item by per-row interval and priority, sync results back, correlate with local git repos, digest into Obsidian memory, and self-heal via a watchdog. Instantiate this pattern for any recurring "read a task list -> do bounded agent work -> report" need; the live Feishu patrol system is one concretization of it.
----
+Runtime: both `verify-adapter-spec.ps1` and `adapter-contract-test.ps1` require PowerShell 7
+(`pwsh`). They are UTF-8 without BOM; Windows PowerShell 5.1 decodes them as ANSI and fails
+to parse. Judge reds by pwsh 7 only.
 
 # patrol-scaffold Skill
 
@@ -91,6 +90,36 @@ Three layers make the swap real (not just documented):
 Adding a provider = 2 files + one contract-test PASS. If you find yourself
 editing `patrol-loop.ps1`, the contract has a hole: fix the contract first.
 
+## Verifying a new provider (acceptance commands)
+
+Adding a provider = descriptor + module (`references/adapter-spec.md`). It is not
+"connected" until these pass:
+
+```
+pwsh -NoProfile -File tests/verify-adapter-spec.ps1                      # descriptor/spec drift (offline, read-only)
+pwsh -NoProfile -File scripts/adapter-contract-test.ps1                  # contract test over EVERY descriptor
+pwsh -NoProfile -File scripts/adapter-contract-test.ps1 -Provider <name> # one provider only (legacy usage kept)
+```
+
+`verify-adapter-spec.ps1` walks `adapters/*.adapter.json` and checks: required keys and their
+types; provider non-empty, unique and matching the file name; `module` a relative path that
+exists; `kind` in `file|cli|api`; every declared `function` (three slots plus
+`optional.<slot>`) actually defined by the module after a **read-only** dot-source — the
+write-back function is never called; every `${...}` placeholder in `args` resolvable from
+`config` (`${tasksFile}` excepted, the assembly layer injects it); `optional` an object.
+Unknown top-level keys are a **failure, not ignored** — a typo'd `writeback` would otherwise
+be silently defaulted; a missing `optional` key is only a WARN. Non-zero exit on any failure,
+and the script ships a self-test that builds good/broken fixtures in %TEMP% and asserts all
+13 rules really go red while the good one stays green, so a green run can be believed.
+
+`adapter-contract-test.ps1` loops all descriptors, prints `[PASS]/[SKIP]/[FAIL]` per provider,
+and names a missing module or missing function explicitly (including capability functions
+under `optional`) instead of silently skipping. Credentialed providers stay SKIP, never FAIL.
+
+Runtime: both `verify-adapter-spec.ps1` and `adapter-contract-test.ps1` require PowerShell 7
+(`pwsh`). They are UTF-8 without BOM; Windows PowerShell 5.1 decodes them as ANSI and fails
+to parse. Judge reds by pwsh 7 only.
+
 ## Concretizations (reference)
 
 - **Feishu (live):** provider=`bitable` via `lark-cli base --as user`; fields
@@ -129,4 +158,6 @@ editing `patrol-loop.ps1`, the contract has a hole: fix the contract first.
 - `tests/verify-provider-isolation.ps1` - 装配层回归：三个 provider 同名函数（Get-PatrolItems 等）同进程依次装配时互不串味；老实现必红。
 - `references/local-json-adapter.md` - provider=local-json 适配器文档 + 拷贝即跑 dry-run 指南。
 - `references/csv-file-adapter.md` - provider=csv-file 的 11 节规格：本地 CSV 源（零网络零凭据），含「什么时候该用 / 不该用」与已知边界。
-- `scripts/` - 最小可跑参考实现：`local-json-adapter.ps1`（源适配器）+ `csv-file-adapter.ps1`（CSV 源适配器，`Import-Csv` 解析、列映射可配、写回只改目标行且无 BOM）+ `patrol-provider.ps1`（适配器装配层）+ `adapter-contract-test.ps1`（契约自测）+ `patrol-loop.ps1`（due-list/worker 池/回写/digest，worker 默认 dry-run）+ `sample-tasks.json` / `sample-tasks.csv`（示例任务）。
+- `tests/verify-adapter-spec.ps1` - descriptor/spec drift gate: required keys and types, unique provider matching the file name, module path exists, declared functions exist after a read-only dot-source, `${...}` placeholders resolvable in `config`; built-in broken-fixture self-test.
+- `scripts/adapter-contract-test.ps1` - contract self-test over **every** descriptor (assembly -> list-items -> per-row schema -> resolve-name; write-back only checked for existence/callability).
+- `scripts/` - 最小可跑参考实现：`local-json-adapter.ps1`（源适配器）+ `csv-file-adapter.ps1`（CSV 源适配器，`Import-Csv` 解析、列映射可配、写回只改目标行且无 BOM）+ `patrol-provider.ps1`（适配器装配层）+ `patrol-loop.ps1`（due-list/worker 池/回写/digest，worker 默认 dry-run）+ `sample-tasks.json` / `sample-tasks.csv`（示例任务）。

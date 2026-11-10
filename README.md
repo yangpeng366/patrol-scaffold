@@ -48,6 +48,29 @@ pwsh -File patrol-loop.ps1 -TasksFile sample-tasks.json -Once -DryRun
 
 跑不通先修 pwsh / 路径——链路跑不通之前，架构读了也白读。跑通后再读 `references/patrol-blueprint.md` 理解架构、`references/local-json-adapter.md` 换真实数据源。
 
+## 新增 provider 的验收命令
+
+新增数据源 = 一个描述文件 + 一个模块（填表见 `references/adapter-spec.md`），接完必须过这三条：
+
+```powershell
+pwsh -NoProfile -File tests/verify-adapter-spec.ps1                      # 描述文件规格漂移检查（离线、只读）
+pwsh -NoProfile -File scripts/adapter-contract-test.ps1                  # 全 provider 契约自测（自动遍历全部 adapter）
+pwsh -NoProfile -File scripts/adapter-contract-test.ps1 -Provider <name> # 只验自己那一家
+```
+
+`verify-adapter-spec.ps1` 扫 `adapters/*.adapter.json`，逐项校验：必需键齐全且类型正确、provider 唯一且与文件名一致、
+`module` 是相对路径且文件存在、`kind` 在允许值内、每个声明的函数 dot-source 后确实存在（只读，不跑写回）、
+args 里的 `${...}` 占位能在 `config` 中解析（`${tasksFile}` 例外，由装配层统一注入）、`optional` 必须是对象。
+**未知顶层键按 FAIL 处理、不忽略**（拼错成 `writeback` 会被装配层静默取默认值）；缺 `optional` 键只 WARN。
+失败 `exit 1`，并自带一段坏样本自证（在 %TEMP% 造好/坏样本，断言 13 类规则都会红、好样本仍是绿的，不污染仓库）。
+
+`adapter-contract-test.ps1` 遍历全部描述文件，逐个 provider 打 `[PASS]/[SKIP]/[FAIL]`；缺模块、缺函数会点名报错
+（包括 `optional` 里的能力型函数），不会静默跳过；需凭据的 provider 仍是 SKIP 而非 FAIL。
+验收线：`verify-adapter-spec.ps1` 为 `fail=0`（且 `selftest fail=0`），`adapter-contract-test.ps1` 为 `fail=0`。
+
+**运行环境**：`verify-adapter-spec.ps1` 与 `adapter-contract-test.ps1` 都要求 PowerShell 7（pwsh）。
+两个脚本都是 UTF-8 无 BOM，Windows PowerShell 5.1 会把中文按 ANSI 解码而解析失败。
+
 ## 安装
 
 ```bash
@@ -70,7 +93,8 @@ pwsh -File patrol-loop.ps1 -TasksFile sample-tasks.json -Once -DryRun
 - `adapters/tencent-docs.adapter.json` + `scripts/tencent-docs-adapter.ps1` — 腾讯文档智能表格（第二类真实适配器）
 - `adapters/csv-file.adapter.json` + `scripts/csv-file-adapter.ps1` — 本地 CSV 文件（第三类适配器，零网络零凭据；`Import-Csv` 解析、列映射可配、写回只改目标行）
 - `scripts/patrol-provider.ps1` — 适配器装配层（导入、归一、调用）
-- `scripts/adapter-contract-test.ps1` — 适配器契约自测（离线校验器）
+- `scripts/adapter-contract-test.ps1` — 适配器契约自测（遍历全部 provider；离线校验器）
+- `tests/verify-adapter-spec.ps1` — 描述文件规格漂移检查（必需键/类型、provider 唯一、module 存在、声明函数存在、`${占位}` 可解析；带坏样本自证）
 - `tests/verify-tencent-docs-adapter.ps1` — tencent-docs 端到端自测（本地 mock 服务，无需真凭据）
 - `tests/verify-csv-file-adapter.ps1` — csv-file 离线自测（%TEMP% 沙箱：列映射 / 引号逗号换行 / 缺列报错 / 写回字节保真 / 无 BOM）
 - `docs/tencent-docs-adapter.md` — tencent-docs 的 11 节适配器规格与落地待办
