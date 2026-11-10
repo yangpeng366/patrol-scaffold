@@ -50,7 +50,7 @@ pwsh -File patrol-loop.ps1 -TasksFile sample-tasks.json -Once -DryRun
 
 ## 新增 provider 的验收命令
 
-新增数据源 = 一个描述文件 + 一个模块（填表见 `references/adapter-spec.md`），接完必须过这三条：
+新增数据源 = 一个描述文件 + 一个模块（业务判断填表见 `references/adapter-spec.md`，逐键逐函数的接入步骤见 `references/adding-a-provider.md`），接完必须过这三条：
 
 ```powershell
 pwsh -NoProfile -File tests/verify-adapter-spec.ps1                      # 描述文件规格漂移检查（离线、只读）
@@ -105,7 +105,7 @@ args 里的 `${...}` 占位能在 `config` 中解析（`${tasksFile}` 例外，�
 - `tests/verify-provider-isolation.ps1` — 多 provider 同进程同名函数不串味（装配层回归）
 - `tests/verify-secret-history.ps1` — 历史密钥盘点：只报告命中提交，不改历史
 - `.githooks/pre-commit` — 把门禁挂到提交前：`git config core.hooksPath .githooks`
-- `.github/workflows/verify.yml` — CI（windows-latest / shell: pwsh）：契约自测 + csv-file 离线自测 + 密钥卫生
+- `.github/workflows/verify.yml` — CI（windows-latest / shell: pwsh）：描述文件规格漂移 + 契约自测 + csv-file 离线自测 + 密钥卫生
 
 ## License
 

@@ -92,8 +92,9 @@ editing `patrol-loop.ps1`, the contract has a hole: fix the contract first.
 
 ## Verifying a new provider (acceptance commands)
 
-Adding a provider = descriptor + module (`references/adapter-spec.md`). It is not
-"connected" until these pass:
+Adding a provider = descriptor + module (`references/adapter-spec.md`); the wiring
+checklist (required keys, function signatures, `${...}` sources, failure table) is in
+`references/adding-a-provider.md`. It is not "connected" until these pass:
 
 ```
 pwsh -NoProfile -File tests/verify-adapter-spec.ps1                      # descriptor/spec drift (offline, read-only)
