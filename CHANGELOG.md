@@ -1,0 +1,75 @@
+# Changelog
+
+本仓发布以 **`VERSION` 文件 + git tag `v<version>`** 标记，没有 `package.json`，也没有构建步骤；
+发布物是仓库受控文件的 zip 归档，由 `scripts/build-release.ps1` 生成（见 `docs/releasing.md`）。
+
+格式沿用 Keep a Changelog 的分节（Added / Changed / Fixed / Known limits），日期为 `YYYY-MM-DD`。
+
+## [0.2.0] - 2026-11-11
+
+主题：**把「换数据源」从文档承诺变成有闸门的能力**。本版新增契约层、声明式注册、两个离线 provider
+（`csv-file` / `command`）与一组机器门禁；`patrol-loop.ps1` / `patrol-provider.ps1` /
+`adapter-contract-test.ps1` / `schemas/item.schema.json` 四件核心在本轮 provider 扩展中 **0 行改动**
+（口径见 `docs/adapting-a-provider.md` §0）。
+
+### Added
+
+- **适配器契约层**：`schemas/item.schema.json` 作为 item 形状唯一事实源；`adapters/<provider>.adapter.json`
+  声明式注册（模块 / 配置 / 三个契约槽位 / `optional` 能力）；`scripts/patrol-provider.ps1` 负责导入、
+  归一（`ConvertTo-PatrolItem`）与按 provider 复位函数集合。
+- **`scripts/adapter-contract-test.ps1`**：扫 `adapters/` 逐个 provider 实跑装配 → `list-items()` →
+  每行过 schema → `resolve-name()`；缺模块/缺函数点名报错，需凭据的 provider 为 SKIP 而非 FAIL。
+- **`tests/verify-adapter-spec.ps1`**：描述文件静态漂移闸门（必需键与类型、provider 唯一且与文件名一致、
+  `module` 存在、声明函数 dot-source 后存在、`${...}` 可在 `config` 解析、`E-ARGNAME` 校验 `args` 键名
+  ⊆ 模块具名参数）；自带坏样本自证（3 好 9 坏，14 类规则必须全红、好样本必须全绿）。
+- **provider `csv-file`**：本地 CSV 源，`Import-Csv` 解析、列映射可配、写回只改目标行且保留其余字节，零网络零凭据。
+- **provider `command`**：一次命令调用输出 JSON 的源（SCNet / 任意 CLI / 数据库导出）。子进程执行、
+  超时杀进程树、退出码透传、stdout 只认 JSON、信封 `itemsPath` 与字段名 `fieldMap` 可配；
+  写回只落本地镜像（`state/`，已忽略），源永远只读。随仓分发 mock 命令 fixture，CI 可真跑。
+- **provider `tencent-docs`**：腾讯文档智能表格（Smartsheet 记录）适配器，分页 / 按列标题取值 /
+  按视图与阶段过滤；写回受 `config.syncBack` 与显式开关双门控制，默认仅落本地镜像。
+- **跨仓契约闸门 `tests/verify-item-contract-parity.ps1`**：本仓与 `dsh-patrol` 的 `item.schema.json`
+  按约束面逐键比较；CI 稀疏 checkout 兄弟仓后真跑，不再退化成 SKIP。
+- **多 provider 隔离回归 `tests/verify-provider-isolation.ps1`**：四家 provider 同进程同名函数互不串味。
+- **密钥卫生**：`tests/verify-no-secrets.ps1`（扫 `git ls-files` 全量受控文件，命中即非零退出）、
+  `tests/verify-secret-history.ps1`（历史盘点，只报告不改历史）、`.githooks/pre-commit`。
+- **运行态外置**：`state/patrol-state.json` 承载 `lastRun` / 阶段等运行态，只读源不再被回写；
+  `tests/verify-state-externalization.ps1` 断言源文件字节不变、第二轮 `due=0`。
+- **适配文档**：`references/adding-a-provider.md`（逐键逐函数接入清单 + 失败对照表）、
+  `docs/adapting-a-provider.md`（command 适配的实测账、8 步清单、何时才该动核心）、
+  `references/csv-file-adapter.md`、`docs/tencent-docs-adapter.md`。
+- **发布面（本版收口）**：`VERSION`（唯一版本事实源）、本 `CHANGELOG.md`、`docs/releasing.md`
+  （门禁 / 打包 / 安装升级 / SKIP 政策）、`scripts/build-release.ps1`（可复现打包 + 归档自证）。
+
+### Changed
+
+- 去掉随仓 vendored 依赖快照，改为 `references/external-dependencies.md` 索引（权威源 / 取法 / 降级底线）。
+- CI（`.github/workflows/verify.yml`，windows-latest / `shell: pwsh`）从「跑一个脚本」变成七步：
+  描述文件规格漂移、全 provider 契约自测、跨仓 schema 同源、csv-file 离线自测、command 离线自测、
+  密钥卫生、发布归档自证（归档写到 `RUNNER_TEMP`，不进工作树）。
+- 文档口径与实测对齐：契约自测实测为 `pass=3 skip=2 fail=0`（`command` / `csv-file` / `local-json` 实跑，
+  `bitable` / `tencent-docs` 无凭据 SKIP），不再沿用旧的 `pass=2 skip=2`。
+
+### Fixed
+
+- 多 provider 同进程装配时，后装的同名契约函数遮住先装的一家（`Import-PatrolProvider` 改为按 provider
+  复位函数集合；老实现必红，回归见 `verify-provider-isolation.ps1`）。
+- `pwsh -Command` 只回 0/1，把 CLI 的真实退出码（如 7）压平：`command` 模块改为包一层 scriptblock
+  透传 `$LASTEXITCODE`，非 0 一律抛错并回显 stderr 尾部，绝不当空源。
+- 巡检运行态写回只读源文件：改落 `state/`，并按 `-StateFile` 隔离（含临时目录自测）。
+
+### Known limits
+
+- `bitable` 与 `tencent-docs` 在无凭据环境是 **SKIP**（`needsCredentials=true` 且 `configPath` 为空）：
+  只验到「描述文件 + 模块 + 函数存在 + 装配」，没有实跑真实 `list-items()`。`tencent-docs` 另有本地 mock
+  HTTP 服务的离线覆盖（14 条断言）；`bitable` 在本仓没有离线 harness。判定与恢复条件见
+  `docs/adapting-a-provider.md` §8。
+- 打包脚本在 Windows + PowerShell 7 上验证。zip 字节级可复现仅限同一台机器 / 同一 .NET 版本；
+  跨机器请比对 `SHA256SUMS.txt` 的逐文件哈希（`docs/releasing.md` §3）。
+- 本版**未**打 tag、未推送：`git tag v0.2.0` 由维护者在验收后手工执行（见 `docs/releasing.md` §6）。
+
+## [0.1.0] - 2026-09-13
+
+初始版本：七层巡检架构（Source Adapter / Scheduler / Worker / Sync-back / Correlator / Output /
+Watchdog）+ Trigger 层；`bitable` 与 `local-json` 两个参考落地；`SKILL.md` 入口与 `references/`
+蓝皮书；最小可跑 dry-run。无版本文件、无契约闸门、无发布流程（本版起补齐）。

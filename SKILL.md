@@ -2,6 +2,9 @@ Runtime: both `verify-adapter-spec.ps1` and `adapter-contract-test.ps1` require 
 (`pwsh`). They are UTF-8 without BOM; Windows PowerShell 5.1 decodes them as ANSI and fails
 to parse. Judge reds by pwsh 7 only.
 
+Version: `0.2.0` (`VERSION` is the single source of truth; the git tag is `v0.2.0`).
+Changelog in `CHANGELOG.md`; release / packaging / install / upgrade in `docs/releasing.md`.
+
 # patrol-scaffold Skill
 
 A generalized scaffold extracted from the live 飞书巡检定时任务 ecosystem. The
@@ -22,11 +25,12 @@ pwsh -File tests/verify-state-externalization.ps1
 pwsh -File scripts/patrol-loop.ps1 -TasksFile scripts/sample-tasks.json -Once -DryRun
 ```
 
-Expected: contract test `pass=2 skip=2 fail=0` (bitable / tencent-docs are SKIP without
-credentials, never FAIL); state test `state externalization: PASS`; `due=3/3`,
-three workers complete, runtime state lands in `state/patrol-state.json` while
-`sample-tasks.json` stays read-only, digest lands in `downloads/patrol-<ts>.json|.md`.
-Immediate re-run shows `due=0/3` because `lastRun` is merged from the state file.
+Expected: contract test `pass=3 skip=2 fail=0` (`command` / `csv-file` / `local-json` run for
+real; `bitable` / `tencent-docs` are SKIP without credentials, never FAIL); state test
+`state externalization: PASS`; `due=3/3`, three workers complete, runtime state lands in
+`state/patrol-state.json` while `sample-tasks.json` stays read-only, digest lands in
+`downloads/patrol-<ts>.json|.md`. Immediate re-run shows `due=0/3` because `lastRun` is
+merged from the state file.
 
 If this fails, fix your pwsh / dot-source path FIRST — the scaffold is
 meaningless until the pipeline runs end-to-end. Then read
@@ -42,9 +46,9 @@ meaningless until the pipeline runs end-to-end. Then read
 
 ## The 7-layer architecture (provider-agnostic)
 
-1. **Source Adapter** - read rows from a spreadsheet/doc source into a common
-   item shape. Swappable provider: `bitable` | `tencent-docs` | `sheets` |
-   `local-json`. This is the ONLY layer that knows the vendor.
+1. **Source Adapter** - read rows from a spreadsheet/doc/CLI source into a common
+   item shape. Swappable provider: `bitable` | `tencent-docs` | `csv-file` |
+   `local-json` | `command`. This is the ONLY layer that knows the vendor.
 2. **Scheduler** - round-based loop: due = `now - lastRun >= interval`;
    priority sort (P0 < P1 < P2); worker-pool concurrency cap; round hard
    timeout; global mutex (no concurrent instances).
@@ -151,12 +155,20 @@ to parse. Judge reds by pwsh 7 only.
 
 ## Files
 
+- `VERSION` - version single source of truth (`0.2.0`, no `v`; the git tag carries the `v`).
+- `CHANGELOG.md` - Added / Changed / Fixed / Known limits per version; `0.2.0` also records
+  which providers are only SKIP-covered.
+- `docs/releasing.md` - release procedure: the eight local gates and their expected output, archive
+  build/verify, install / upgrade / rollback, and the SKIP-is-not-a-blocker policy.
+- `scripts/build-release.ps1` - reproducible archive builder that re-opens its own zip and
+  proves: manifest equality, per-entry hashes, no runtime/temp files, `VERSION` match,
+  `scripts/sample-tasks.json` byte-equal to HEAD (user edits excluded), no secrets.
 - `references/adapter-spec.md` - fill-in-the-blank template for adding a data source (11 sections) + test checklist.
 - `references/patrol-blueprint.md` - full architecture, real params, two concretizations (Feishu live / 腾讯文档 swap-in), "apply to other needs" 13-step checklist, anti-patterns.
 - `schemas/item.schema.json` - item contract (single source of truth).
 - `adapters/*.adapter.json` - declarative provider descriptors.
 - `adapters/command.adapter.json` + `scripts/command-adapter.ps1` - provider=command：一次命令调用输出 JSON 的源（SCNet / 任意 CLI / 数据库导出）。子进程执行、超时杀进程树、退出码透传、信封 itemsPath / 字段名 fieldMap 可配；零凭据，mock 命令随仓分发（`tests/fixtures/command/`）所以 CI 可真跑。
-- `docs/adapting-a-provider.md` - 加一个数据源要动多少东西：command 适配的实测账（核心 0 行）、8 步清单、常见坑、何时只加 adapter / 何时动核心。
+- `docs/adapting-a-provider.md` - 加一个数据源要动多少东西：command 适配的实测账（核心 0 行）、8 步清单、常见坑、何时只加 adapter / 何时动核心、**§8 当前 provider 支持边界与 SKIP 恢复条件**。
 - `references/external-dependencies.md` - 外部依赖索引：Codex 全局规约、TextFile.ps1、lark-cli、lark-base-helpers.ps1、codex CLI —— 只记「权威源在哪 / 怎么取 / 取不到怎么办」，**不随仓分发**；取不到时的最小纪律底线也在该页。
 - `references/scheduled-task-recipe.md` - 触发器层：计划任务 round 模型（首选）/ Register-ScheduledTask 模板 / nssm 常驻、看门狗、三条不变量、真实实例与踩坑。
 - `tests/verify-no-secrets.ps1` - 密钥卫生门禁：`git ls-files` 全量扫受控文件（token 形态 / Bearer /

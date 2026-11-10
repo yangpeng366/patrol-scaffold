@@ -245,6 +245,70 @@ pwsh -NoProfile -File tests/verify-<name>-adapter.ps1          # fail=0
 
 ---
 
+## 8. 支持边界与 SKIP（0.2.0 实测）
+
+> 这一节回答两个常被混为一谈的问题：**「契约自测 PASS」到底证明了什么**，以及
+> **「bitable / tencent-docs 一直 SKIP，能不能发版」**。发布政策全文见 `docs/releasing.md` §5。
+
+### 8.1 五家的当前边界
+
+| provider | 契约自测（无凭据环境） | 已证到的深度 | 未覆盖的缺口 | 本仓离线补偿 |
+|---|---|---|---|---|
+| `command` | **PASS**（3 行） | 装配 → 子进程命令 → JSON 解析 → fieldMap → schema → resolve-name → 镜像写回幂等 | 真实 CLI 的鉴权/网络形态（fixture 是本地 mock） | `verify-command-adapter.ps1` 45 条断言（含退出码 7 / 超时 / banner / fieldMap 拼错） |
+| `csv-file` | **PASS**（3 行） | 同上 + 列映射 / 引号逗号换行 / 写回字节保真 | 无 | `verify-csv-file-adapter.ps1` 43 条断言 |
+| `local-json` | **PASS** | 装配 → 读 JSON → 归一 → schema | 无 | dry-run + `verify-provider-isolation.ps1` |
+| `tencent-docs` | **SKIP** | 描述文件 / 模块 / 3 个函数存在 / 装配 | 真实鉴权、真实分页边界、列标题与视图名 | `verify-tencent-docs-adapter.ps1`：本地 mock HTTP 覆盖 2 页读取、归档行过滤、字段映射、epoch→ISO、镜像写回（14 条） |
+| `bitable` | **SKIP** | 同上 | 真实 `lark-cli` 调用、字段名映射、分页 | **无**（`tests/verify-bitable-adapter.ps1` 是本地业务扩展，`.gitignore` 已排除，不随包分发） |
+
+### 8.2 SKIP 到底跳过了什么
+
+判据写死在 `scripts/adapter-contract-test.ps1`：`needsCredentials=true` **且** `configPath`
+展开为空。跳过的是**唯一一步**——真实 `list-items()` 实跑与逐行 schema 校验。
+
+在 SKIP 判定之前，这些检查已经发生且不会因为凭据缺失而跳过：
+
+1. 描述文件能解析、`provider` 与文件名一致、`module` 存在且不是绝对路径；
+2. 模块 dot-source 成功，`listItems` / `writeBack` / `resolveName` 三函数与 `optional.<slot>`
+   声明的能力函数都存在；
+3. `verify-adapter-spec.ps1` 对同一批文件的静态规格（11 键 / `${...}` / `E-ARGNAME`）全绿。
+
+所以读法只有一个：**SKIP = 没实跑，不是没检查**；它不能当 PASS 用，也不能当 FAIL 读。
+
+### 8.3 恢复到「实跑」的条件（不改代码）
+
+```powershell
+# 配置文件放仓外，只放定位信息 / 列映射 / 视图名，不放明文密钥
+$env:PATROL_TENCENT_DOCS_CONFIGPATH = "$env:USERPROFILE\.patrol\tencent-docs.json"
+pwsh -NoProfile -File scripts/adapter-contract-test.ps1 -Provider tencent-docs
+
+# bitable 同理（键名固定 configPath）
+$env:PATROL_BITABLE_CONFIGPATH = "$env:USERPROFILE\.patrol\bitable.json"
+pwsh -NoProfile -File scripts/adapter-contract-test.ps1 -Provider bitable
+```
+
+环境变量名由装配层按 `<PROVIDER>_<CONFIGKEY>` 大写生成；也可以走 `-Values`。
+键不叫 `configPath` 的 provider **不会** SKIP，会直接实跑——那时无凭据必红是预期行为。
+
+### 8.4 结论：SKIP 不阻塞本次发布（附条件）
+
+本版把 SKIP 判为**不阻塞**，理由三条，都可核：
+
+1. **本版没改这两家的代码**：0.2.0 的变更是契约层、注册、新增 `csv-file` / `command` 与门禁；
+   `BitAbleAdapter.ps1` / `tencent-docs-adapter.ps1` / 两份描述文件均未改动。拿未改动的代码要求
+   新增凭据实跑，验的是环境不是发布内容。
+2. **凭据不能进仓 / 不能进 CI**：密钥卫生是硬门禁（`verify-no-secrets.ps1`），为一次验收引入仓库
+   secret 等于用发布流程破坏自己刚立的安全约束。
+3. **收益可被离线手段替代**：`tencent-docs` 的真实代码路径已有 mock 服务覆盖；`bitable` 的缺口是
+   「无离线 harness」，属已知技术债（已记在 `CHANGELOG.md` Known limits），与本版发布无关。
+
+**下一次发布时，出现下列任一情况就必须先补离线 harness 或做一次受控实跑，SKIP 才算阻塞**：
+
+- 该 provider 的模块、描述文件，或它依赖的装配层 / 归一函数被改动；
+- `verify-adapter-spec.ps1` 对该 provider 出现 `fail` 或 `S-*`（连静态都没验完）；
+- 该 provider 是本次发布的卖点（例如首次发布某家 provider）。
+
+---
+
 ## 一页速查
 
 ```
@@ -254,4 +318,5 @@ tests/fixtures/<name>/         离线 mock：无网络、无凭据、路径相�
 tests/verify-<name>-adapter.ps1  happy path + 每个负面分支 + 跨 provider 形状一致
 核心改动                        0 行（patrol-provider / patrol-loop / adapter-contract-test / item.schema）
 判定                            能用「item 形状 + 三个槽位」表达 -> 只加 adapter；否则先补契约
+SKIP                            只表示「缺 configPath、没实跑 list-items」；读作没检查会误判发布风险
 ```

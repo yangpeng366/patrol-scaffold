@@ -278,8 +278,8 @@ pwsh -NoProfile -File tests/verify-no-secrets.ps1                         # 4) �
 ```
 
 1. `verify-adapter-spec.ps1` 逐文件打 `[PASS]/[FAIL]`，末尾 `summary pass=N fail=0 skip=0 warnings=M`，
-   然后跑**自带自证**：在 `%TEMP%` 造 1 好 6 坏样本，断言 13 类规则全部会红、
-   `summary selftest pass=3 fail=0`、`RESULT: PASS`、`exit 0`。判红标准：`fail>0` 或 `selftest fail>0`。
+   然后跑**自带自证**：在 `%TEMP%` 造 3 好 9 坏样本，断言 14 类规则（`E-*`）全部会红、
+   `summary selftest pass=8 fail=0`、`RESULT: PASS`、`exit 0`。判红标准：`fail>0` 或 `selftest fail>0`。
 2. `adapter-contract-test.ps1 -Provider <name>` 打一行 `[PASS] <name>  items=N  module=...`。
    **需凭据的 provider 是 SKIP 不是 FAIL**，但 SKIP 的条件很具体：
    `needsCredentials=true` **且** `configPath` 这个键解析后为空（键名写死在脚本里）。

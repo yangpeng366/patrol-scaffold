@@ -2,6 +2,9 @@
 
 可复用、供应商无关的「定时巡检」自动化脚手架（Codex skill）。
 
+**版本：0.2.0**（2026-11-11）| 变更见 [`CHANGELOG.md`](CHANGELOG.md) | 发布 / 打包 / 安装升级见
+[`docs/releasing.md`](docs/releasing.md)；版本事实源是 [`VERSION`](VERSION)。
+
 从一套在用的飞书巡检定时任务系统抽象而来。核心洞察：整套巡检链路里只有最顶层的
 「数据源适配器」认识厂商（飞书 Bitable / 腾讯文档智能表格 / Sheets / 本地 JSON），
 下面的调度器、worker、关联器、输出、看门狗全部可原样复用。换数据源 = 换一个适配器
@@ -27,10 +30,15 @@
 
 外加 **Trigger 层**（计划任务 round 模型 / nssm 常驻）。
 
-## 两种落地
+## 五种落地（同一 item 契约，换源 = 换 provider）
 
 - **飞书（在用）**：provider=`bitable`，`lark-cli base` 读项目方向表 → 派发 `codex exec` → 回写 Bitable。
 - **腾讯文档**：provider=`tencent-docs`，智能表格行 1:1 映射同一 item 契约，下游全不变。
+- **本地 CSV**：provider=`csv-file`，零网络零凭据，写回只改目标行。
+- **本地 JSON**：provider=`local-json`，dry-run 与教学的默认落地。
+- **命令型源**：provider=`command`，一次命令输出 JSON（SCNet / 任意 CLI / 数据库导出）。
+
+各家的当前支持边界（哪家实跑、哪家只是 SKIP、缺口在哪）见下一节，**别把 SKIP 当成 PASS 读**。
 
 ## 其他 Agent 快速上手（先跑通命令行再谈架构）
 
@@ -42,9 +50,31 @@ pwsh -File adapter-contract-test.ps1      # 契约自测：适配器装配 + 每
 pwsh -File patrol-loop.ps1 -TasksFile sample-tasks.json -Once -DryRun
 ```
 
-预期：契约自测 `pass=2 skip=2 fail=0`（csv-file / local-json 实跑，bitable / tencent-docs 无凭据时为 SKIP 而非 FAIL）；
-`due=3/3`，三个 worker 完成，`sample-tasks.json` 的 `lastRun` 被回写，digest 落在
+预期：契约自测 `pass=3 skip=2 fail=0`（`command` / `csv-file` / `local-json` 实跑，
+`bitable` / `tencent-docs` 无凭据时为 SKIP 而非 FAIL）；`due=3/3`，三个 worker 完成，
+运行态落 `state/patrol-state.json`（**源文件只读，不被回写**），digest 落在
 `downloads/patrol-<ts>.json|.md`。立即重跑：`due=0/3`（证 per-row interval 过滤生效）。
+
+> 版本更新后先跑这条链路再谈别的：`due=3/3` 是「装好了」的唯一硬信号。
+
+## Provider 支持边界（0.2.0 实测）
+
+| provider | kind | 凭据 / 网络 | 契约自测 | 本仓离线覆盖 | 写回行为 |
+|---|---|---|---|---|---|
+| `command` | cli | 无 / 无（mock 命令随仓） | **PASS**（3 行） | `verify-command-adapter.ps1` 45 条断言 | 只写本地镜像 `state/command-mirror.json`，源永远只读 |
+| `csv-file` | file | 无 / 无 | **PASS**（3 行） | `verify-csv-file-adapter.ps1` 43 条断言 | 只改目标行的指定列，其余字节保留 |
+| `local-json` | file | 无 / 无 | **PASS** | `verify-provider-isolation.ps1` + dry-run | 写回任务 JSON（demo 链路不调用，源只读） |
+| `bitable` | cli | 需要（`lark-cli` + config）/ 需要 | **SKIP** | **无**（`tests/verify-bitable-adapter.ps1` 是本地扩展，不入仓） | 受 `sync_back` + 显式 `-SyncBack` 双门控制 |
+| `tencent-docs` | api | 需要（开放平台凭据）/ 需要 | **SKIP** | `verify-tencent-docs-adapter.ps1` 本地 mock，14 条断言 | 默认只落镜像；配置 + 显式开关才写远端 |
+
+**SKIP 的判据只有一个**：`needsCredentials=true` 且 `configPath` 展开为空 → 跳过「真实 `list-items()` 实跑」。
+在此之前，描述文件解析、模块 dot-source、三个槽位函数与 `optional` 能力函数的存在性都已检查（坏描述文件必红，
+不会因凭据 SKIP）。所以 SKIP = **没实跑**，不是**没检查**。
+
+**恢复条件**（不改代码）：把仓外配置文件路径给到 `configPath`，例如
+`$env:PATROL_TENCENT_DOCS_CONFIGPATH = "$env:USERPROFILE\.patrol\tencent-docs.json"`，再跑
+`pwsh -NoProfile -File scripts/adapter-contract-test.ps1 -Provider tencent-docs`。完整判据、两家的缺口清单、
+以及「什么情况下 SKIP 才算阻塞发布」，见 `docs/adapting-a-provider.md` §8 与 `docs/releasing.md` §5。
 
 跑不通先修 pwsh / 路径——链路跑不通之前，架构读了也白读。跑通后再读 `references/patrol-blueprint.md` 理解架构、`references/local-json-adapter.md` 换真实数据源。
 
@@ -75,20 +105,30 @@ args 里的 `${...}` 占位能在 `config` 中解析（`${tasksFile}` 例外，�
 **运行环境**：`verify-adapter-spec.ps1` 与 `adapter-contract-test.ps1` 都要求 PowerShell 7（pwsh）。
 两个脚本都是 UTF-8 无 BOM，Windows PowerShell 5.1 会把中文按 ANSI 解码而解析失败。
 
-## 安装
+## 安装、升级与打包
 
-```bash
-# 方式一：Codex skill-installer 从本仓安装（推荐）
-#   调用 skill-installer skill，传入本 repo 路径
-#
-# 方式二：手动
-#   把本目录拷到 $CODEX_HOME/skills/patrol-scaffold/
+```powershell
+# 新装：从发布归档（或 skill-installer / 直接拷目录，三种等价）
+Expand-Archive -LiteralPath patrol-scaffold-0.2.0.zip -DestinationPath $env:TEMP\rel
+Copy-Item -Recurse -Force $env:TEMP\rel\patrol-scaffold-0.2.0 "$env:CODEX_HOME\skills\patrol-scaffold"
+
+# 升级：停触发器 -> 备份 state/patrol-state.json -> 只换代码文件 -> 跑 dry-run
+#       state/ downloads/ reports/ memory/ 与仓外配置不属于发布物，不要覆盖
+
+# 打包（产物落 %TEMP%，不入仓；脚本自带归档自证）
+pwsh -NoProfile -File scripts/build-release.ps1 -IncludeUntracked
 ```
 
 安装后，任何会话遇到 recurring 巡检需求时调用 `patrol-scaffold` skill 即可拿到蓝图。
+完整流程（八道本地门禁的期望输出、归档校验清单、可复现口径、升级与回滚）见 `docs/releasing.md`。
+发布物结构、`SHA256SUMS.txt` 的用法与 tag 约定也在那一页。
 
 ## 文件
 
+- `VERSION` — 版本唯一事实源（`0.2.0`，无 `v` 前缀；tag 才带 `v`）
+- `CHANGELOG.md` — 变更说明（Added / Changed / Fixed / Known limits，按版本分节）
+- `docs/releasing.md` — 发布手册：八道本地门禁与期望输出、打包与归档校验、安装 / 升级 / 回滚、SKIP 政策
+- `scripts/build-release.ps1` — 可复现打包 + 归档自证（清单 / 逐条哈希 / 禁入模式 / HEAD-blob 排除用户改动 / 产物密钥扫描）
 - `SKILL.md` — 入口（七层架构 + 适配器契约 + 安全边界）
 - `references/adapter-spec.md` — **加一个数据源的填表式模板（11 节）**
 - `references/patrol-blueprint.md` — 全架构 + 真实参数 + 两种落地 + 13 步迁移清单 + 踩坑
@@ -103,7 +143,7 @@ args 里的 `${...}` 占位能在 `config` 中解析（`${tasksFile}` 例外，�
 - `tests/verify-tencent-docs-adapter.ps1` — tencent-docs 端到端自测（本地 mock 服务，无需真凭据）
 - `tests/verify-csv-file-adapter.ps1` — csv-file 离线自测（%TEMP% 沙箱：列映射 / 引号逗号换行 / 缺列报错 / 写回字节保真 / 无 BOM）
 - `tests/verify-command-adapter.ps1` — command 离线自测（%TEMP% 沙箱：mock 命令 / 信封与 itemsPath / 退出码 7 / 超时 / banner / fieldMap 拼错 / 镜像幂等 / 与 local-json 的 item 形状一致）
-- `docs/adapting-a-provider.md` — **加一个数据源要动多少东西**：本次 command 适配的实测账（核心 0 行）、8 步最小清单、常见坑、何时只加 adapter / 何时动核心
+- `docs/adapting-a-provider.md` — **加一个数据源要动多少东西**：本次 command 适配的实测账（核心 0 行）、8 步最小清单、常见坑、何时只加 adapter / 何时动核心、**§8 支持边界与 SKIP 判据**
 - `docs/tencent-docs-adapter.md` — tencent-docs 的 11 节适配器规格与落地待办
 - `references/csv-file-adapter.md` — csv-file 的 11 节适配器规格 + 「这类源什么时候该用 / 不该用」
 - `references/external-dependencies.md` — 外部依赖索引（权威源 / 取法 / 降级），**不随仓分发**
@@ -112,7 +152,7 @@ args 里的 `${...}` 占位能在 `config` 中解析（`${tasksFile}` 例外，�
 - `tests/verify-provider-isolation.ps1` — 多 provider 同进程同名函数不串味（装配层回归）
 - `tests/verify-secret-history.ps1` — 历史密钥盘点：只报告命中提交，不改历史
 - `.githooks/pre-commit` — 把门禁挂到提交前：`git config core.hooksPath .githooks`
-- `.github/workflows/verify.yml` — CI（windows-latest / shell: pwsh）：描述文件规格漂移 + 契约自测 + csv-file 离线自测 + 密钥卫生
+- `.github/workflows/verify.yml` — CI（windows-latest / shell: pwsh）：描述文件规格漂移 + 全 provider 契约自测 + 跨仓 item 契约同源 + csv-file 离线自测 + command 离线自测 + 密钥卫生 + 发布归档自证（归档落 `RUNNER_TEMP`，不进工作树）
 
 ## License
 

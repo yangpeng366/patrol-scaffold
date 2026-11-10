@@ -1,8 +1,9 @@
 name: verify
 
-# 门槛只做六件事：描述文件规格漂移、契约自测（每个 provider 过同一把尺子）、csv-file 离线自测、
+# 门槛只做七件事：描述文件规格漂移、契约自测（每个 provider 过同一把尺子）、csv-file 离线自测、
 # command 离线自测（mock 命令，无凭据无网络，CI 可真跑）、跨仓 item 契约同源校验（兄弟仓 dsh-patrol
-# 稀疏 checkout 后真跑，不再是 SKIP）、密钥卫生。
+# 稀疏 checkout 后真跑，不再是 SKIP）、密钥卫生、发布归档自证（内容清单 / 逐条哈希 / 禁入模式 /
+# 用户改动排除 / 产物密钥扫描）。
 # 除「稀疏 checkout 公开兄弟仓 yangpeng366/dsh-patrol 的 schemas/」这一条取数动作外，全部离线：
 # 不装依赖、不跑网络用例、不需要任何 secret（公开仓用默认 GITHUB_TOKEN 即可）。
 
@@ -76,3 +77,11 @@ jobs:
       - name: Secret hygiene gate
         shell: pwsh
         run: pwsh -NoProfile -File tests/verify-no-secrets.ps1
+
+      # 发布归档自证：打包不是重点，「归档内容是清单的逐字节副本」才是。脚本会重开 zip 验
+      # 条目集合 / 逐条 SHA256 / 禁入模式（.git、state、downloads、reports、*.zip、临时文件）/
+      # VERSION 与 CHANGELOG 一致 / sample-tasks.json == HEAD blob / 解包后再跑一遍密钥卫生。
+      # 归档写到 RUNNER_TEMP，不进工作树；clean checkout 下无需 -IncludeUntracked。
+      - name: Release archive (build + self-verify)
+        shell: pwsh
+        run: pwsh -NoProfile -File scripts/build-release.ps1 -OutputDirectory (Join-Path $env:RUNNER_TEMP 'release')
