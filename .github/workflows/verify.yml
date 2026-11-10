@@ -1,8 +1,9 @@
 name: verify
 
 # 门槛只做五件事：描述文件规格漂移、契约自测（每个 provider 过同一把尺子）、csv-file 离线自测、
-# 跨仓 item 契约同源校验（CI 上 SKIP，原因见该步骤注释）、密钥卫生。
-# 全部离线：不装依赖、不联网取数据、不需要任何凭据。
+# 跨仓 item 契约同源校验（兄弟仓 dsh-patrol 稀疏 checkout 后真跑，不再是 SKIP）、密钥卫生。
+# 除「稀疏 checkout 公开兄弟仓 yangpeng366/dsh-patrol 的 schemas/」这一条取数动作外，全部离线：
+# 不装依赖、不跑网络用例、不需要任何 secret（公开仓用默认 GITHUB_TOKEN 即可）。
 
 on:
   push:
@@ -37,20 +38,28 @@ jobs:
         shell: pwsh
         run: pwsh -NoProfile -File scripts/adapter-contract-test.ps1
 
-      # 跨仓同源校验：本仓 schemas/item.schema.json 与 dsh-patrol/schemas/item.schema.json
+      # 跨仓同源校验（真闸门）：本仓 schemas/item.schema.json 与 dsh-patrol/schemas/item.schema.json
       # 必须逐键等价（比较口径见 tests/verify-item-contract-parity.ps1 文件头）。
       #
-      # 为什么 CI 上这步是 SKIP 而不是 FAIL：本 workflow 只 checkout 了 patrol-scaffold 一个仓，
-      # 脚本默认查找的 ../dsh-patrol/schemas/item.schema.json 必然不存在。脚本对
-      # 「按相对位置推出来的路径缺失」打印 SKIP 并 exit 0；只有「显式 -OtherSchema 指了但不存在的
-      # 路径」才 exit 1（手滑不是环境不具备）。这条口径与既有步骤一致：
-      # verify-no-secrets.ps1（文件不在本 checkout => SKIP）、adapter-contract-test.ps1
-      # （缺凭据/配置 => SKIP）——SKIP 只表示「本环境无法判定」，绝不冒充 PASS，只有 FAIL 才红。
-      # 想把这一步在 CI 里变成真闸门，需把 dsh-patrol 一并 checkout 到 workspace 的 ../dsh-patrol
-      # （例如再加一个 actions/checkout 并用 with.path: ../dsh-patrol）。
-      - name: Item contract parity (cross-repo; SKIP when dsh-patrol is absent)
+      # 旧版本这里只 checkout 了 patrol-scaffold 一个仓，脚本默认查找的 ../dsh-patrol/schemas/
+      # item.schema.json 在 CI 上必然不存在，于是这步永远打印 SKIP 并 exit 0——闸门形同虚设。
+      # 现在改为：先把兄弟仓 yangpeng366/dsh-patrol 稀疏 checkout 到 workspace 内的 dsh-patrol/
+      # （只取 schemas，fetch-depth 1），再用显式 -OtherSchema 指过去。显式给路就一定要读到文件，
+      # 读不到直接 FAIL（脚本对「显式指路指空」判红，不再退化成 SKIP），所以 CI 上它是真闸门。
+      # 公开仓用默认 GITHUB_TOKEN、不需要新增 secret；除这次 checkout 外不联网、离线可复跑：
+      # 本机等价命令 pwsh -NoProfile -File tests/verify-item-contract-parity.ps1 `
+      #   -OtherSchema <dsh-patrol 克隆目录>/schemas/item.schema.json
+      - name: Checkout dsh-patrol schema (cross-repo gate input)
+        uses: actions/checkout@v4
+        with:
+          repository: yangpeng366/dsh-patrol
+          path: dsh-patrol
+          sparse-checkout: schemas
+          fetch-depth: 1
+
+      - name: Item contract parity (cross-repo; real gate)
         shell: pwsh
-        run: pwsh -NoProfile -File tests/verify-item-contract-parity.ps1
+        run: pwsh -NoProfile -File tests/verify-item-contract-parity.ps1 -OtherSchema ./dsh-patrol/schemas/item.schema.json
 
       - name: csv-file adapter self-test
         shell: pwsh
