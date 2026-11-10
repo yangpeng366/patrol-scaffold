@@ -155,12 +155,15 @@ to parse. Judge reds by pwsh 7 only.
 - `references/patrol-blueprint.md` - full architecture, real params, two concretizations (Feishu live / 腾讯文档 swap-in), "apply to other needs" 13-step checklist, anti-patterns.
 - `schemas/item.schema.json` - item contract (single source of truth).
 - `adapters/*.adapter.json` - declarative provider descriptors.
+- `adapters/command.adapter.json` + `scripts/command-adapter.ps1` - provider=command：一次命令调用输出 JSON 的源（SCNet / 任意 CLI / 数据库导出）。子进程执行、超时杀进程树、退出码透传、信封 itemsPath / 字段名 fieldMap 可配；零凭据，mock 命令随仓分发（`tests/fixtures/command/`）所以 CI 可真跑。
+- `docs/adapting-a-provider.md` - 加一个数据源要动多少东西：command 适配的实测账（核心 0 行）、8 步清单、常见坑、何时只加 adapter / 何时动核心。
 - `references/external-dependencies.md` - 外部依赖索引：Codex 全局规约、TextFile.ps1、lark-cli、lark-base-helpers.ps1、codex CLI —— 只记「权威源在哪 / 怎么取 / 取不到怎么办」，**不随仓分发**；取不到时的最小纪律底线也在该页。
 - `references/scheduled-task-recipe.md` - 触发器层：计划任务 round 模型（首选）/ Register-ScheduledTask 模板 / nssm 常驻、看门狗、三条不变量、真实实例与踩坑。
 - `tests/verify-no-secrets.ps1` - 密钥卫生门禁：`git ls-files` 全量扫受控文件（token 形态 / Bearer /
   凭据变量赋字面量 / AK-IA / gh-p_），并断言两个 JEV verify 脚本只从环境变量或仓库外密钥文件读；命中 FAIL 非零退出。
 - `tests/verify-secret-history.ps1` - 历史盘点（`git log -p --all`），只报告命中提交/文件 + 轮换建议，永不失败、不改历史。
-- `tests/verify-provider-isolation.ps1` - 装配层回归：三个 provider 同名函数（Get-PatrolItems 等）同进程依次装配时互不串味；老实现必红。
+- `tests/verify-provider-isolation.ps1` - 装配层回归：四个 provider（bitable / tencent-docs / local-json / command）同名函数（Get-PatrolItems 等）同进程依次装配时互不串味；老实现必红。
+- `tests/verify-command-adapter.ps1` - command 离线自测：mock 命令 / 信封与 itemsPath / 退出码 / 超时 / banner / fieldMap / 镜像幂等 / 与 local-json 形状一致。
 - `references/local-json-adapter.md` - provider=local-json 适配器文档 + 拷贝即跑 dry-run 指南。
 - `references/csv-file-adapter.md` - provider=csv-file 的 11 节规格：本地 CSV 源（零网络零凭据），含「什么时候该用 / 不该用」与已知边界。
 - `tests/verify-adapter-spec.ps1` - descriptor/spec drift gate: required keys and types, unique provider matching the file name, module path exists, declared functions exist after a read-only dot-source, `${...}` placeholders resolvable in `config`; built-in broken-fixture self-test.

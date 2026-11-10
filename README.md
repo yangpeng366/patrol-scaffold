@@ -96,11 +96,14 @@ args 里的 `${...}` 占位能在 `config` 中解析（`${tasksFile}` 例外，�
 - `adapters/*.adapter.json` — provider 声明式描述（模块 / 配置 / 契约函数）
 - `adapters/tencent-docs.adapter.json` + `scripts/tencent-docs-adapter.ps1` — 腾讯文档智能表格（第二类真实适配器）
 - `adapters/csv-file.adapter.json` + `scripts/csv-file-adapter.ps1` — 本地 CSV 文件（第三类适配器，零网络零凭据；`Import-Csv` 解析、列映射可配、写回只改目标行）
+- `adapters/command.adapter.json` + `scripts/command-adapter.ps1` — 命令型源（第四类适配器：一次命令调用输出 JSON，覆盖 SCNet / 任意 CLI / 数据库导出；子进程执行 + 超时 + 退出码透传 + 信封/字段名可配；零凭据，mock 命令随仓分发所以 CI 可真跑）
 - `scripts/patrol-provider.ps1` — 适配器装配层（导入、归一、调用）
 - `scripts/adapter-contract-test.ps1` — 适配器契约自测（遍历全部 provider；离线校验器）
 - `tests/verify-adapter-spec.ps1` — 描述文件规格漂移检查（必需键/类型、provider 唯一、module 存在、声明函数存在、`${占位}` 可解析；带坏样本自证）
 - `tests/verify-tencent-docs-adapter.ps1` — tencent-docs 端到端自测（本地 mock 服务，无需真凭据）
 - `tests/verify-csv-file-adapter.ps1` — csv-file 离线自测（%TEMP% 沙箱：列映射 / 引号逗号换行 / 缺列报错 / 写回字节保真 / 无 BOM）
+- `tests/verify-command-adapter.ps1` — command 离线自测（%TEMP% 沙箱：mock 命令 / 信封与 itemsPath / 退出码 7 / 超时 / banner / fieldMap 拼错 / 镜像幂等 / 与 local-json 的 item 形状一致）
+- `docs/adapting-a-provider.md` — **加一个数据源要动多少东西**：本次 command 适配的实测账（核心 0 行）、8 步最小清单、常见坑、何时只加 adapter / 何时动核心
 - `docs/tencent-docs-adapter.md` — tencent-docs 的 11 节适配器规格与落地待办
 - `references/csv-file-adapter.md` — csv-file 的 11 节适配器规格 + 「这类源什么时候该用 / 不该用」
 - `references/external-dependencies.md` — 外部依赖索引（权威源 / 取法 / 降级），**不随仓分发**

@@ -1,0 +1,31 @@
+{
+  "provider": "command",
+  "title": "命令型数据源（CLI 输出 JSON）",
+  "module": "scripts/command-adapter.ps1",
+  "kind": "cli",
+  "needsCredentials": false,
+  "needsNetwork": false,
+  "description": "数据源是「一次命令调用输出的 JSON 数组」：命令在子进程里执行（工作目录=仓库根），stdout 整段按 JSON 解析，字段名用 fieldMap 重映射，信封结构用 itemsPath 指定。覆盖 SCNet / 任意 CLI / 数据库导出等形态；无需凭据，mock 命令随仓分发，CI 可实跑。write-back 只落本地镜像，命令源永远只读。",
+  "config": {
+    "command": "pwsh -NoProfile -File tests/fixtures/command/mock-jobs.ps1",
+    "fieldMap": "id=jobId;title=jobName;priority=priority;interval=intervalMin;status=state;action=nextStep;note=note;repo=repo",
+    "itemsPath": ".",
+    "timeoutSec": "30",
+    "mirrorFile": "state/command-mirror.json"
+  },
+  "listItems": {
+    "function": "Get-PatrolItems",
+    "args": {
+      "Command": "${command}",
+      "FieldMap": "${fieldMap}",
+      "ItemsPath": "${itemsPath}",
+      "TimeoutSec": "${timeoutSec}"
+    }
+  },
+  "writeBack": {
+    "function": "Save-PatrolItems",
+    "args": { "MirrorFile": "${mirrorFile}" }
+  },
+  "resolveName": { "function": "Resolve-ItemName", "args": {} },
+  "optional": {}
+}
