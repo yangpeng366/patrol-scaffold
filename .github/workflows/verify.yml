@@ -40,6 +40,14 @@ jobs:
         shell: pwsh
         run: pwsh -NoProfile -File scripts/adapter-contract-test.ps1
 
+      # 发布归档自证先于兄弟仓 checkout：actions/checkout 会把 dsh-patrol/ 写进当前工作树，
+      # 而发布脚本把任何未跟踪文件视为“不应进包”并 fail-closed。
+      - name: Release archive (build + self-verify)
+        shell: pwsh
+        run: |
+          $releaseDir = Join-Path $env:RUNNER_TEMP 'release'
+          pwsh -NoProfile -File scripts/build-release.ps1 -OutputDirectory $releaseDir
+
       # 跨仓同源校验（真闸门）：本仓 schemas/item.schema.json 与 dsh-patrol/schemas/item.schema.json
       # 必须逐键等价（比较口径见 tests/verify-item-contract-parity.ps1 文件头）。
       #
@@ -78,12 +86,3 @@ jobs:
         shell: pwsh
         run: pwsh -NoProfile -File tests/verify-no-secrets.ps1
 
-      # 发布归档自证：打包不是重点，「归档内容是清单的逐字节副本」才是。脚本会重开 zip 验
-      # 条目集合 / 逐条 SHA256 / 禁入模式（.git、state、downloads、reports、*.zip、临时文件）/
-      # VERSION 与 CHANGELOG 一致 / sample-tasks.json == HEAD blob / 解包后再跑一遍密钥卫生。
-      # 归档写到 RUNNER_TEMP，不进工作树；clean checkout 下无需 -IncludeUntracked。
-      - name: Release archive (build + self-verify)
-        shell: pwsh
-        run: |
-          $releaseDir = Join-Path $env:RUNNER_TEMP 'release'
-          pwsh -NoProfile -File scripts/build-release.ps1 -OutputDirectory $releaseDir
