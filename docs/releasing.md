@@ -25,7 +25,7 @@
 
 ---
 
-## 1. 发布前门禁（八条，全绿才算候选）
+## 1. 发布前门禁（九条，全绿才算候选）
 
 在仓库根执行，全部要求 **PowerShell 7（pwsh）**、离线、不读凭据：
 
@@ -33,6 +33,7 @@
 pwsh -NoProfile -File tests/verify-adapter-spec.ps1
 pwsh -NoProfile -File scripts/adapter-contract-test.ps1
 pwsh -NoProfile -File tests/verify-item-contract-parity.ps1
+pwsh -NoProfile -File tests/verify-item-parity-e2e.ps1
 pwsh -NoProfile -File tests/verify-provider-isolation.ps1
 pwsh -NoProfile -File tests/verify-csv-file-adapter.ps1
 pwsh -NoProfile -File tests/verify-command-adapter.ps1
@@ -52,6 +53,7 @@ pwsh -NoProfile -File tests/verify-state-externalization.ps1
 | `verify-adapter-spec.ps1` | `summary pass=5 fail=0 skip=0 warnings=0` + `summary selftest pass=8 fail=0` + `RESULT: PASS` | `fail>0` 或 `selftest fail>0` |
 | `adapter-contract-test.ps1` | `summary pass=3 skip=2 fail=0` | `fail>0` |
 | `verify-item-contract-parity.ps1` | `summary pass=1 fail=0 skip=0` + `RESULT: PASS`（无兄弟仓时 `skip=1`，不算红） | `RESULT: FAIL` |
+| `verify-item-parity-e2e.ps1` | `summary items=7 fields-per-item=17 diffs=0` + `RESULT: PASS`（无兄弟仓或无 node ≥ 22.6 时 `RESULT: SKIP`，不算红） | `RESULT: FAIL`（任一字段不等 / 右侧解析报错 / selftest 未过） |
 | `verify-provider-isolation.ps1` | `summary pass=12 fail=0` | `fail>0` |
 | `verify-csv-file-adapter.ps1` | `summary pass=43 fail=0` | `fail>0` |
 | `verify-command-adapter.ps1` | `summary pass=45 fail=0` | `fail>0` |

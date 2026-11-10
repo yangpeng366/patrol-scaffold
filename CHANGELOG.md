@@ -5,6 +5,51 @@
 
 格式沿用 Keep a Changelog 的分节（Added / Changed / Fixed / Known limits），日期为 `YYYY-MM-DD`。
 
+## [Unreleased]
+
+主题：**把「两仓解析同一行得到同一份 item」也变成会红的闸门**。上一版只比两份 `item.schema.json` 的
+约束面（静态同源），这次补的是动态对拍（同一份行数据喂两边，逐字段相等）。
+
+### Added
+
+- **`tests/verify-item-parity-e2e.ps1`**：跨仓端到端对拍。7 条 fixture 行（正常 / 缺 `巡检间隔(分钟)` /
+  间隔 `0` / 优先级 `P3` / 假数据 `true` / 字符串 `"true"` / 空白与小数间隔）同时喂本仓
+  `BitAbleAdapter.ps1::Convert-BitableRowToItem` 与 dsh-patrol 的 `bitable.ts` + `provider.ts`；逐字段
+  （含 null/字符串/数字/布尔的类型）不等即 `exit 1`。兄弟仓或 node 不具备时 `SKIP exit 0`，与
+  `verify-item-contract-parity.ps1` 同一口径。自带比较器自证（改坏样本必须红）。
+- **`tests/normalize-item-dsh.mjs`**：对拍右侧的读取器。用 Node `--experimental-strip-types` 直接 import
+  兄弟仓 TypeScript 原码，只把 `lark-cli` 子进程换成注入的 `exec` 返回 fixture 信封（不联网、不碰真表、
+  不装依赖、不手抄 normalize 逻辑）。
+
+### Changed
+
+- **`scripts/BitAbleAdapter.ps1::Convert-BitableRowToItem` 的归一规则与 dsh-patrol `normalizeItem` 对齐**：
+  - `priority`：去首尾空白 + 大写，只有 `P0/P1` 保留，其余（含 `P3`、空）降 `P2`（原实现原样透传，
+    `P3` 会破 schema enum）；
+  - `intervalMin`：缺列 / 非数字 / `<=0` 一律 `0`，小数向下取整（`45.7 -> 45`，与原 `[int]` 的四舍五入
+    `46` 不同）；
+  - `threadId`：空串与缺列都是 `null`（原来空串是 `''`，两种形状）；
+  - `fake`：只认 Bitable 复选框的真布尔 `true`，字符串 `"true"`/`"1"`/`"yes"` 不再算开；
+  - 补 `authorization` / `collaboration` / `approval` / `pendingAction` / `category` 五个字段，缺省值
+    与 dsh 同（`自主` / `sparse` / `已通过` / `''` / `''`），映射列 `授权边界` / `协作形态` / `审批状态` /
+    `待审行动` / `分类`；
+  - `lastRun` / `currentStage` / `achievement` 分别从 `最近执行时间` / `当前阶段` / `外部成就` 取（原来
+    恒为 `null` / `''` / `''`）；
+  - `id` / `title` / `nextStep` 去首尾空白；`title` 不再回退 `record_id`（空标题由契约层
+    `ConvertTo-PatrolItem` 用 id 补齐，解析层与 dsh 同形）。
+- `tests/verify-bitable-adapter.ps1` 同步上述口径（`pass=16` → `pass=33`），并补新字段/类型断言。
+- `schemas/item.schema.json` **不变**：五个新字段在 `additionalProperties: true` 下合法，且 dsh-patrol 那份
+  schema 同样未列它们；只在本仓加会让 `verify-item-contract-parity.ps1` 报 ONLY-LEFT。要进 schema 得两仓同步一次。
+- README / `references/adding-a-provider.md` / `docs/releasing.md` / CI 补上这条闸门与
+  「解析层保留 0、调度层才回退」的分层说明。
+
+### Fixed
+
+- **`巡检间隔(分钟) = 0` 不再被解析层改写成 60**。原实现 `if ($interval -le 0) { $interval = 60 }` 会让
+  「0 = 每轮到期」的行在解析阶段就变成 60 分钟一轮（静默降频），且与 dsh 的 `normalizeItem`（保留 0）不同形。
+  现在解析层如实保留 `0`，回退只发生在调度层：`patrol-loop.ps1` 的 `<=0 -> 60` 与 dsh
+  `mapping.ts::itemIsDue` 的 `<=0 -> 60` 同一口径，有效行为不变、语义不再丢。
+
 ## [0.2.0] - 2026-11-11
 
 主题：**把「换数据源」从文档承诺变成有闸门的能力**。本版新增契约层、声明式注册、两个离线 provider

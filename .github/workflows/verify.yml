@@ -48,28 +48,42 @@ jobs:
           $releaseDir = Join-Path $env:RUNNER_TEMP 'release'
           pwsh -NoProfile -File scripts/build-release.ps1 -OutputDirectory $releaseDir
 
-      # 跨仓同源校验（真闸门）：本仓 schemas/item.schema.json 与 dsh-patrol/schemas/item.schema.json
-      # 必须逐键等价（比较口径见 tests/verify-item-contract-parity.ps1 文件头）。
+      # 跨仓同源校验（真闸门，两条）：
+      # 1) 静态：两份 schemas/item.schema.json 逐键等价；
+      # 2) 动态：同一份 fixture 行喂本仓 Convert-BitableRowToItem 与兄弟仓 bitable.ts+normalizeItem，逐字段相等。
       #
       # 旧版本这里只 checkout 了 patrol-scaffold 一个仓，脚本默认查找的 ../dsh-patrol/schemas/
       # item.schema.json 在 CI 上必然不存在，于是这步永远打印 SKIP 并 exit 0——闸门形同虚设。
       # 现在改为：先把兄弟仓 yangpeng366/dsh-patrol 稀疏 checkout 到 workspace 内的 dsh-patrol/
-      # （只取 schemas，fetch-depth 1），再用显式 -OtherSchema 指过去。显式给路就一定要读到文件，
-      # 读不到直接 FAIL（脚本对「显式指路指空」判红，不再退化成 SKIP），所以 CI 上它是真闸门。
-      # 公开仓用默认 GITHUB_TOKEN、不需要新增 secret；除这次 checkout 外不联网、离线可复跑：
-      # 本机等价命令 pwsh -NoProfile -File tests/verify-item-contract-parity.ps1 `
-      #   -OtherSchema <dsh-patrol 克隆目录>/schemas/item.schema.json
-      - name: Checkout dsh-patrol schema (cross-repo gate input)
+      # （静态闸门要 schemas，e2e 闸门要 src，都按 fetch-depth 1 取），再用显式路径指过去。
+      # 显式给路就一定要读到文件，读不到直接 FAIL（两个脚本对「显式指路指空」都判红），
+      # 所以 CI 上它们是真闸门。公开仓用默认 GITHUB_TOKEN、不需要新增 secret。
+      - name: Checkout dsh-patrol (cross-repo gate input: schema + source)
         uses: actions/checkout@v4
         with:
           repository: yangpeng366/dsh-patrol
           path: dsh-patrol
-          sparse-checkout: schemas
+          sparse-checkout: |
+            schemas
+            src
           fetch-depth: 1
 
       - name: Item contract parity (cross-repo; real gate)
         shell: pwsh
         run: pwsh -NoProfile -File tests/verify-item-contract-parity.ps1 -OtherSchema ./dsh-patrol/schemas/item.schema.json
+
+      # e2e 对拍直接用 node 跑兄弟仓的 .ts 原码（--experimental-strip-types，Node >= 22.6）。
+      # 不装任何依赖：右侧只 import node 内建模块 + 同仓 src，不碰 pnpm / 构建产物。
+      - name: Setup Node (strip-types runner for cross-repo e2e)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Item parity e2e (cross-repo; real gate)
+        shell: pwsh
+        run: |
+          node --version
+          pwsh -NoProfile -File tests/verify-item-parity-e2e.ps1 -DshRepo ./dsh-patrol
 
       - name: csv-file adapter self-test
         shell: pwsh

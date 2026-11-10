@@ -64,7 +64,7 @@ pwsh -File patrol-loop.ps1 -TasksFile sample-tasks.json -Once -DryRun
 | `command` | cli | 无 / 无（mock 命令随仓） | **PASS**（3 行） | `verify-command-adapter.ps1` 45 条断言 | 只写本地镜像 `state/command-mirror.json`，源永远只读 |
 | `csv-file` | file | 无 / 无 | **PASS**（3 行） | `verify-csv-file-adapter.ps1` 43 条断言 | 只改目标行的指定列，其余字节保留 |
 | `local-json` | file | 无 / 无 | **PASS** | `verify-provider-isolation.ps1` + dry-run | 写回任务 JSON（demo 链路不调用，源只读） |
-| `bitable` | cli | 需要（`lark-cli` + config）/ 需要 | **SKIP** | **无**（`tests/verify-bitable-adapter.ps1` 是本地扩展，不入仓） | 受 `sync_back` + 显式 `-SyncBack` 双门控制 |
+| `bitable` | cli | 需要（`lark-cli` + config）/ 需要 | **SKIP** | 行映射离线对拍 `tests/verify-item-parity-e2e.ps1`（对兄弟仓 TypeScript 原码，需 node + dsh-patrol 克隆）；`tests/verify-bitable-adapter.ps1` 是本地业务扩展，不入仓 | 受 `sync_back` + 显式 `-SyncBack` 双门控制 |
 | `tencent-docs` | api | 需要（开放平台凭据）/ 需要 | **SKIP** | `verify-tencent-docs-adapter.ps1` 本地 mock，14 条断言 | 默认只落镜像；配置 + 显式开关才写远端 |
 
 **SKIP 的判据只有一个**：`needsCredentials=true` 且 `configPath` 展开为空 → 跳过「真实 `list-items()` 实跑」。
@@ -75,6 +75,22 @@ pwsh -File patrol-loop.ps1 -TasksFile sample-tasks.json -Once -DryRun
 `$env:PATROL_TENCENT_DOCS_CONFIGPATH = "$env:USERPROFILE\.patrol\tencent-docs.json"`，再跑
 `pwsh -NoProfile -File scripts/adapter-contract-test.ps1 -Provider tencent-docs`。完整判据、两家的缺口清单、
 以及「什么情况下 SKIP 才算阻塞发布」，见 `docs/adapting-a-provider.md` §8 与 `docs/releasing.md` §5。
+
+### 跨仓两道闸门：静态契约面 + 动态解析面
+
+两份 `schemas/item.schema.json` 的对比只能证明「契约文本同源」，证明不了「同一行解析出同一个 item」。
+所以跨仓闸门是两条，都要过：
+
+```powershell
+pwsh -NoProfile -File tests/verify-item-contract-parity.ps1   # 静态：两份 schema 约束面逐键相同
+pwsh -NoProfile -File tests/verify-item-parity-e2e.ps1        # 动态：同一行喂两边，逐字段（含类型）相等
+```
+
+`verify-item-parity-e2e.ps1` 的右侧不是手抄的 normalize 副本，而是用 Node（`--experimental-strip-types`，
+需 ≥ 22.6）直接 import 兄弟仓 `src/source/bitable.ts` + `src/source/provider.ts`，只把 `lark-cli` 子进程
+换成注入的 `exec` 返回 fixture 信封——列映射与归一都是 dsh-patrol 原码。7 条 fixture 覆盖：正常行、
+缺 `巡检间隔(分钟)`、间隔 `0`、优先级 `P3`、假数据 true / 字符串 `"true"`、空白+大小写+小数间隔+空串 threadId。
+本机没 clone 兄弟仓、或没有 node ≥ 22.6 时打印 `SKIP`（exit 0）并写明缺什么；**SKIP 不是 PASS**。
 
 跑不通先修 pwsh / 路径——链路跑不通之前，架构读了也白读。跑通后再读 `references/patrol-blueprint.md` 理解架构、`references/local-json-adapter.md` 换真实数据源。
 
@@ -139,6 +155,8 @@ pwsh -NoProfile -File scripts/build-release.ps1 -IncludeUntracked
 - `adapters/command.adapter.json` + `scripts/command-adapter.ps1` — 命令型源（第四类适配器：一次命令调用输出 JSON，覆盖 SCNet / 任意 CLI / 数据库导出；子进程执行 + 超时 + 退出码透传 + 信封/字段名可配；零凭据，mock 命令随仓分发所以 CI 可真跑）
 - `scripts/patrol-provider.ps1` — 适配器装配层（导入、归一、调用）
 - `scripts/adapter-contract-test.ps1` — 适配器契约自测（遍历全部 provider；离线校验器）
+- `tests/verify-item-contract-parity.ps1` — 跨仓静态闸门：两份 `schemas/item.schema.json` 按约束面逐键比较（带坏样本自证）
+- `tests/verify-item-parity-e2e.ps1` + `tests/normalize-item-dsh.mjs` — 跨仓动态闸门：同一份 fixture 行同时喂本仓 `Convert-BitableRowToItem` 与兄弟仓 `bitable.ts`+`normalizeItem`（node 直跑 TS 原码），逐字段比到类型，不等即 exit 1
 - `tests/verify-adapter-spec.ps1` — 描述文件规格漂移检查（必需键/类型、provider 唯一、module 存在、声明函数存在、`${占位}` 可解析；带坏样本自证）
 - `tests/verify-tencent-docs-adapter.ps1` — tencent-docs 端到端自测（本地 mock 服务，无需真凭据）
 - `tests/verify-csv-file-adapter.ps1` — csv-file 离线自测（%TEMP% 沙箱：列映射 / 引号逗号换行 / 缺列报错 / 写回字节保真 / 无 BOM）
@@ -152,7 +170,7 @@ pwsh -NoProfile -File scripts/build-release.ps1 -IncludeUntracked
 - `tests/verify-provider-isolation.ps1` — 多 provider 同进程同名函数不串味（装配层回归）
 - `tests/verify-secret-history.ps1` — 历史密钥盘点：只报告命中提交，不改历史
 - `.githooks/pre-commit` — 把门禁挂到提交前：`git config core.hooksPath .githooks`
-- `.github/workflows/verify.yml` — CI（windows-latest / shell: pwsh）：描述文件规格漂移 + 全 provider 契约自测 + 跨仓 item 契约同源 + csv-file 离线自测 + command 离线自测 + 密钥卫生 + 发布归档自证（归档落 `RUNNER_TEMP`，不进工作树）
+- `.github/workflows/verify.yml` — CI（windows-latest / shell: pwsh）：描述文件规格漂移 + 全 provider 契约自测 + 跨仓 item 契约同源（静态 schema + 动态解析对拍）+ csv-file 离线自测 + command 离线自测 + 密钥卫生 + 发布归档自证（归档落 `RUNNER_TEMP`，不进工作树）
 
 ## License
 

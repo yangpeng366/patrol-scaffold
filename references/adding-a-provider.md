@@ -230,7 +230,20 @@ pwsh -NoProfile -File tests/verify-adapter-spec.ps1
 | `lastRun` | `DateTime`/`DateTimeOffset` → ISO 8601（`'o'`）；空 → `$null` |
 | `threadId` / `fake` | 空 → `$null` / `false` |
 | `repoPath`、`description`、`nextStep`、`currentStage`、`achievement` | 空 → `''` |
+| `authorization` / `collaboration` / `approval` | 空 → `自主` / `sparse` / `已通过`（与 dsh-patrol 同默认） |
+| `pendingAction`、`category` | 空 → `''` |
 | 其它字段 | 原样保留（`schemas/item.schema.json` 的 `additionalProperties: true`） |
+
+上面这 17 个字段在两仓都有一份实现（本仓 PowerShell 生产代码、`dsh-patrol` 的 `normalizeItem`），
+**同一行喂两边必须得到同一份 item**。这条不只靠 schema 对拍：
+`tests/verify-item-parity-e2e.ps1` 用 7 条 fixture 行同时喂 `BitAbleAdapter.ps1::Convert-BitableRowToItem`
+和兄弟仓 `src/source/bitable.ts`（真的 import 原码，不手抄），逐字段比、类型也要一样，任一不等 exit 1。
+改归一规则（尤其 `priority` / `intervalMin` / `threadId` / `fake`）先跑它。
+
+> `intervalMin` 的分层：**解析层如实翻译**（0 / 缺列 / 非法 → `0`），**调度层才做回退**
+> （`patrol-loop.ps1` 与 dsh `mapping.ts::itemIsDue` 都是 `<=0 → 60`）。
+> 所以适配器里写 `if ($interval -le 0) { $interval = 60 }` 是**错的**——它会把「0 = 每轮到期」的行
+> 在解析阶段就改成 60 分钟一轮，两仓从此不同形，且静默降频。
 
 `schemas/item.schema.json` 的 `required` 是 `id/title/priority/intervalMin`，但归一之后这四个一定齐，
 所以契约自测真正会红的是 **`id` 为空**、**`priority` 非法**、**`intervalMin` 非整数**这几类。
