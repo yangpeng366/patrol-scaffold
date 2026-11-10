@@ -18,14 +18,28 @@
       6) args 里的 ${...} 占位必须能在 config 中解析；${tasksFile} 例外
          （装配层 Import-PatrolProvider 统一注入 -Values @{ tasksFile = ... }）
       7) optional 必须是对象，optional.<slot> 必须是 { function, args }
+      8) 【E-ARGNAME】每个槽位 args 的键名必须是该槽位 function 在 module 文件里
+         真实声明的具名参数（逐字比较，大小写也算不同）。
+         方向只查「args 键 ⊆ 函数具名参数」，不反查「函数的每个参数都必须出现在 args」——
+         -Items / -Item 由装配层写死注入（asm: & $fn @args -Items $Items），
+         反查会把 adapters/bitable.adapter.json 的 writeBack（只写 TasksFile）误判成红。
+         参数表来自 PowerShell 自带 parser 的 AST（function ... param(...) 块），
+         不是正则：跨行参数表、[Parameter(...)] 属性、默认值里的括号/字符串、
+         注释里的 '( )' 都由 parser 配平；零新依赖、不执行模块。
+         依据：装配层按参数名注入，键名写错时高级函数报「找不到与参数名称」、
+         简单函数把多余具名参数静默收进 $args（不报错也不生效），
+         两种都不会在真实轮次里被当成配置错误——所以要在提交前静态挡掉。
 
     规格没写死、这里定死并显式打印的两条口径：
       - 未知顶层键 => FAIL（不忽略）。理由：把 writeBack 拼成 "writeback" 时装配层会静默按默认值走，
         漂移检查就失去意义。确需扩展字段，先改 references/adapter-spec.md。
       - 缺 optional 键 => WARN（不 FAIL）。理由：装配层把 $null optional 当「无该能力」处理。
 
-    自证：默认附带一段自测——在 %TEMP% 下造「1 条好样本 + 6 条坏样本」，断言每类规则都真的会红、
+    自证：默认附带一段自测——在 %TEMP% 下造「3 条好样本 + 9 条坏样本」，断言每类规则都真的会红、
     好样本是绿的；临时目录 finally 删除，仓库零污染。关掉用 -NoSelfTest。
+    args 键名闸门的自测是「3 负 + 2 正」：键名拼错 / 大小写不符 / 函数不存在（走 E-FUNC，不误报 E-ARGNAME）
+    各一条；bitable 式「writeBack 只给部分参数」与「函数无具名参数 + args {}」各一条，必须绿。
+    可重跑命令：pwsh -NoProfile -File tests/verify-adapter-spec.ps1（自测段随主流程一起跑）。
 
     运行环境：仅 PowerShell 7（pwsh）。本脚本与仓内其它 .ps1 一样存为 UTF-8 无 BOM；
     Windows PowerShell 5.1 会把无 BOM 中文按 ANSI 解码，连解析都过不去。脚本内保留的
@@ -148,6 +162,97 @@ function Test-SpecArgPlaceholders {
 }
 
 # ---------------------------------------------------------------------------
+# 参数签名提取（E-ARGNAME 用）：只解析、不执行
+# ---------------------------------------------------------------------------
+function Get-AdapterFunctionSignatureMap {
+    <#
+        从 .ps1/.psm1 里抽出每个 function 的具名参数表。用 PowerShell 自带 parser 的 AST，
+        而不是正则/手写扫描：param( 的括号配平、跨行参数表、[Parameter(...)] 属性、
+        默认值里的括号与字符串、注释里的 '( )' 全部由 parser 负责，零新依赖。
+        只看文件级 / if 等控制流里的函数定义（不进嵌套 scriptblock——那种定义不在模块作用域）。
+        同名函数重复定义时：按文件顺序取最后一个（PowerShell 后定义者生效），并把名字记进 Duplicates。
+    #>
+    param([Parameter(Mandatory)][string]$ModulePath)
+
+    $tokens = $null
+    $parseErrors = $null
+    $ast = [System.Management.Automation.Language.Parser]::ParseFile($ModulePath, [ref]$tokens, [ref]$parseErrors)
+
+    $map = @{}   # PowerShell 哈希表默认大小写不敏感，正好匹配「函数名不分大小写」
+    $dups = New-Object System.Collections.Generic.List[string]
+    if ($parseErrors -and @($parseErrors).Count -gt 0) {
+        # 语法错时参数表不可信；E-SYNTAX 已经在主流程报红
+        return [pscustomobject]@{ Ok = $false; Functions = $map; Duplicates = $dups.ToArray() }
+    }
+
+    $fnAsts = $ast.FindAll({
+            param($node)
+            return ($node -is [System.Management.Automation.Language.FunctionDefinitionAst])
+        }, $false)
+
+    foreach ($fd in $fnAsts) {
+        $paramNames = New-Object System.Collections.Generic.List[string]
+        # 注意：本仓写法是 function X { param(...) }，参数表挂在 Body.ParamBlock 上；
+        # FunctionDefinitionAst.Parameters 只在个别旧写法下才有值，不能当唯一来源。
+        $paramBlock = $null
+        if ($null -ne $fd.Body) { $paramBlock = $fd.Body.ParamBlock }
+        if ($null -ne $paramBlock) {
+            foreach ($p in $paramBlock.Parameters) {
+                # ParameterAst.Name 是 VariableExpressionAst；保留声明时的原始大小写
+                $paramNames.Add($p.Name.VariablePath.UserPath)
+            }
+        }
+        if ($map.ContainsKey($fd.Name)) { $dups.Add($fd.Name) }
+        $map[$fd.Name] = [pscustomobject]@{
+            Params = $paramNames.ToArray()
+            Line   = $fd.Extent.StartLineNumber
+        }
+    }
+
+    return [pscustomobject]@{ Ok = $true; Functions = $map; Duplicates = $dups.ToArray() }
+}
+
+function Test-SpecArgNames {
+    <#
+        闸门本体：args 的每个键必须是该槽位 function 真实声明的具名参数。
+        只查单向（键 ⊆ 参数）：-Items / -Item 由装配层注入，不要求出现在 args 里。
+        逐字比较（大小写敏感）：PowerShell 绑定虽不区分大小写，但描述文件是人工维护的契约，
+        大小写漂移就是拼写错误的前兆，这里宁红不灰（口径见文件头）。
+    #>
+    param(
+        $ArgsSpec,
+        [string]$SlotLabel,
+        [string]$FunctionName,
+        $Signatures,
+        [string]$ModuleRel,
+        [string]$DescriptorFile,
+        [System.Collections.Generic.List[string]]$Errors
+    )
+    if (-not (Test-SpecType $ArgsSpec 'object')) { return }              # E-TYPE 已报
+    if (-not $FunctionName) { return }                                    # E-EMPTY 已报
+    if ($null -eq $Signatures -or -not $Signatures.Ok) { return }         # 模块没解析出来，E-MODULE/E-SYNTAX 已报
+    if (-not $Signatures.Functions.ContainsKey($FunctionName)) { return }  # E-FUNC 已报；没有参数表就不猜
+
+    $decl = $Signatures.Functions[$FunctionName]
+    $realNames = @($decl.Params)
+    $realText = '（无具名参数）'
+    if ($realNames.Count -gt 0) { $realText = '[' + ($realNames -join ', ') + ']' }
+
+    foreach ($ap in $ArgsSpec.PSObject.Properties) {
+        $exact = @($realNames | Where-Object { $_ -ceq $ap.Name })
+        if ($exact.Count -gt 0) { continue }
+
+        $why = '不在该函数的具名参数表里'
+        $near = @($realNames | Where-Object { $_ -ieq $ap.Name })
+        if ($near.Count -gt 0) { $why = ('大小写不符，真实参数是 ''{0}''' -f $near[0]) }
+
+        Add-SpecIssue $Errors 'E-ARGNAME' (
+            '{0}: {1}.args.{2} 不是函数 {3} 的具名参数（{4}；函数定义于 {5}:{6}；该函数真实参数：{7}）' -f
+            $DescriptorFile, $SlotLabel, $ap.Name, $FunctionName, $why, $ModuleRel, $decl.Line, $realText)
+    }
+}
+
+# ---------------------------------------------------------------------------
 # 单个描述文件
 # ---------------------------------------------------------------------------
 function Test-SpecDescriptor {
@@ -264,6 +369,10 @@ function Test-SpecDescriptor {
         }
     }
 
+    # 参数签名表（供 E-ARGNAME）：只解析 AST，不执行模块；module 不可用时为 $null
+    $signatures = $null
+    if ($modulePath) { $signatures = Get-AdapterFunctionSignatureMap -ModulePath $modulePath }
+
     # config 键集合（供占位校验）
     $configKeys = $null
     if (Test-SpecType $descriptor.config 'object') {
@@ -302,6 +411,8 @@ function Test-SpecDescriptor {
 
         if ($spec.PSObject.Properties['args']) {
             Test-SpecArgPlaceholders -ArgsSpec $spec.args -SlotLabel $slot -ConfigKeys $configKeys -Errors $errors
+            Test-SpecArgNames -ArgsSpec $spec.args -SlotLabel $slot -FunctionName $fnName -Signatures $signatures `
+                -ModuleRel $moduleRel -DescriptorFile $RelPath -Errors $errors
         }
     }
 
@@ -328,7 +439,18 @@ function Test-SpecDescriptor {
             }
             if ($sub.PSObject.Properties['args']) {
                 Test-SpecArgPlaceholders -ArgsSpec $sub.args -SlotLabel $slotLabel -ConfigKeys $configKeys -Errors $errors
+                Test-SpecArgNames -ArgsSpec $sub.args -SlotLabel $slotLabel -FunctionName $sfn -Signatures $signatures `
+                    -ModuleRel $moduleRel -DescriptorFile $RelPath -Errors $errors
             }
+        }
+    }
+
+    # 同名函数重复定义：参数表按「最后一个定义」判，但得让人知道判的是哪一份
+    if ($signatures -and $signatures.Duplicates.Count -gt 0) {
+        $dupDeclared = @($declared | Where-Object { $signatures.Duplicates -contains $_.Name } |
+            ForEach-Object { '{0}({1})' -f $_.Name, $_.Slot })
+        if ($dupDeclared.Count -gt 0) {
+            Add-SpecIssue $warnings 'W-SIGNATURE' ('模块 {0} 里同一个函数被定义了多次（{1}）：E-ARGNAME 只按最后一个定义的参数表判，请先收口成一份' -f $moduleRel, ($dupDeclared -join ', '))
         }
     }
 
@@ -461,11 +583,44 @@ function Invoke-SpecSelfTest {
         New-Item -ItemType Directory -Path $adapterDir -Force | Out-Null
         New-Item -ItemType Directory -Path $scriptDir -Force | Out-Null
 
-        # 好模块：三函数齐备
+        # 好模块：三函数齐备 + 一个「无 param 块」的函数 + 一个可选能力函数。
+        # 刻意写成跨行参数表 / [Parameter(...)] 属性 / 默认值里带括号与引号，注释里再塞 '( )'，
+        # 用来证明参数表是从 AST 抽的，而不是正则扫出来的。
         $goodModule = @'
-function Get-PatrolItems { param([string]$TasksFile) return @() }
-function Save-PatrolItems { param([string]$TasksFile, $Items) }
+function Get-PatrolItems {
+    # list-items()：注释里带一个右括号 ) 和 param( 字样，提取不该被它带偏
+    param(
+        [Parameter(Mandatory)]
+        [string]$TasksFile
+    )
+    return @()
+}
+
+function Save-PatrolItems {
+    # write-back()：$Items 由装配层写死 -Items 注入，描述文件只写 TasksFile
+    param(
+        [Parameter(Mandatory)][string]$TasksFile,
+        [Parameter(Mandatory)]$Items,
+        [string]$Marker = ('(' + ')' + ')'),   # 默认值里带括号
+        [string]$Note = "len=$($TasksFile.Length)"
+    )
+}
+
 function Resolve-ItemName { param($Item) return 'sample' }
+
+function Get-PatrolSummary {
+    # 没有 param 块：只接受空 args
+    return 'no-params'
+}
+
+function Sync-SelftestRound {
+    param(
+        [Parameter(Mandatory)][string]$TasksFile,
+        [Parameter(Mandatory)]$Item,
+        [string]$Identity = 'user'
+    )
+    return $true
+}
 '@
         [System.IO.File]::WriteAllText((Join-Path $scriptDir 'good-adapter.ps1'), $goodModule, $script:Utf8NoBom)
 
@@ -487,6 +642,104 @@ function Resolve-ItemName { param($Item) return 'sample' }
 }
 '@
         [System.IO.File]::WriteAllText((Join-Path $adapterDir 'good.adapter.json'), $goodDescriptor, $script:Utf8NoBom)
+
+        # 正例 A（对齐 bitable）：writeBack 只给 TasksFile，$Items 由装配层注入；
+        #               optional.syncBack 只给 TasksFile，$Item 也是装配层注入。
+        $goodPartialDescriptor = @'
+{
+  "provider": "good-partial",
+  "title": "selftest good partial args",
+  "module": "scripts/good-adapter.ps1",
+  "kind": "cli",
+  "needsCredentials": false,
+  "needsNetwork": false,
+  "description": "selftest: args 只给部分参数，其余由装配层注入",
+  "config": { "tasksFile": "scripts/sample-tasks.json" },
+  "listItems": { "function": "Get-PatrolItems", "args": { "TasksFile": "${tasksFile}" } },
+  "writeBack": { "function": "Save-PatrolItems", "args": { "TasksFile": "${tasksFile}" } },
+  "resolveName": { "function": "Resolve-ItemName", "args": {} },
+  "optional": {
+    "syncBack": { "function": "Sync-SelftestRound", "args": { "TasksFile": "${tasksFile}" } }
+  }
+}
+'@
+        [System.IO.File]::WriteAllText((Join-Path $adapterDir 'good-partial.adapter.json'), $goodPartialDescriptor, $script:Utf8NoBom)
+
+        # 正例 B：函数没有 param 块 + args {}（不应因「函数声明的参数为 0 个」误报）
+        $goodNoArgsDescriptor = @'
+{
+  "provider": "good-noargs",
+  "title": "selftest good no-param function",
+  "module": "scripts/good-adapter.ps1",
+  "kind": "file",
+  "needsCredentials": false,
+  "needsNetwork": false,
+  "description": "selftest: 函数无具名参数时 args 必须为空",
+  "config": {},
+  "listItems": { "function": "Get-PatrolItems", "args": {} },
+  "writeBack": { "function": "Save-PatrolItems", "args": {} },
+  "resolveName": { "function": "Get-PatrolSummary", "args": {} },
+  "optional": {}
+}
+'@
+        [System.IO.File]::WriteAllText((Join-Path $adapterDir 'good-noargs.adapter.json'), $goodNoArgsDescriptor, $script:Utf8NoBom)
+
+        # 负例 1：args 键名拼错（TaskFile -> TasksFile），高级函数实跑会报「找不到参数」
+        $badArgDescriptor = @'
+{
+  "provider": "badarg",
+  "title": "selftest arg name typo",
+  "module": "scripts/good-adapter.ps1",
+  "kind": "file",
+  "needsCredentials": false,
+  "needsNetwork": false,
+  "description": "selftest: args 键名拼错",
+  "config": { "tasksFile": "scripts/sample-tasks.json" },
+  "listItems": { "function": "Get-PatrolItems", "args": { "TaskFile": "${tasksFile}" } },
+  "writeBack": { "function": "Save-PatrolItems", "args": { "TasksFile": "${tasksFile}" } },
+  "resolveName": { "function": "Resolve-ItemName", "args": {} },
+  "optional": {}
+}
+'@
+        [System.IO.File]::WriteAllText((Join-Path $adapterDir 'badarg.adapter.json'), $badArgDescriptor, $script:Utf8NoBom)
+
+        # 负例 2：大小写不符（tasksfile vs TasksFile）。PS 绑定不区分大小写，但描述文件要求逐字对齐
+        $badCaseDescriptor = @'
+{
+  "provider": "badcase",
+  "title": "selftest arg name case",
+  "module": "scripts/good-adapter.ps1",
+  "kind": "file",
+  "needsCredentials": false,
+  "needsNetwork": false,
+  "description": "selftest: args 键名大小写不符",
+  "config": { "tasksFile": "scripts/sample-tasks.json" },
+  "listItems": { "function": "Get-PatrolItems", "args": { "TasksFile": "${tasksFile}" } },
+  "writeBack": { "function": "Save-PatrolItems", "args": { "tasksfile": "${tasksFile}" } },
+  "resolveName": { "function": "Resolve-ItemName", "args": {} },
+  "optional": {}
+}
+'@
+        [System.IO.File]::WriteAllText((Join-Path $adapterDir 'badcase.adapter.json'), $badCaseDescriptor, $script:Utf8NoBom)
+
+        # 负例 3：函数不存在 -> 走 E-FUNC，且不得跟着误报 E-ARGNAME（没参数表就不猜）
+        $badFnDescriptor = @'
+{
+  "provider": "badfn",
+  "title": "selftest function missing",
+  "module": "scripts/good-adapter.ps1",
+  "kind": "file",
+  "needsCredentials": false,
+  "needsNetwork": false,
+  "description": "selftest: 槽位函数不存在",
+  "config": { "tasksFile": "scripts/sample-tasks.json" },
+  "listItems": { "function": "Get-PatrolItemsMissing", "args": { "TasksFile": "${tasksFile}" } },
+  "writeBack": { "function": "Save-PatrolItems", "args": { "TasksFile": "${tasksFile}" } },
+  "resolveName": { "function": "Resolve-ItemName", "args": {} },
+  "optional": {}
+}
+'@
+        [System.IO.File]::WriteAllText((Join-Path $adapterDir 'badfn.adapter.json'), $badFnDescriptor, $script:Utf8NoBom)
 
         # 坏样本 1：类型 / 枚举 / 空函数名 / 未知键 / 占位不存在 / optional 非对象 / 缺键 / 函数不存在
         $brokenDescriptor = @'
@@ -582,18 +835,97 @@ function Resolve-ItemName { param($Item) return 'sample' }
         }
 
         $assertions = New-Object System.Collections.Generic.List[object]
-        $goodResult = @($results | Where-Object { $_.file -like '*good.adapter.json' })
-        $goodOk = ($goodResult.Count -eq 1) -and ($goodResult[0].status -eq 'PASS')
-        $goodDetail = ''
-        if ($goodResult.Count -eq 1 -and $goodResult[0].status -ne 'PASS') {
-            $goodDetail = (@($goodResult[0].errors) -join ' | ')
-        }
-        $assertions.Add([pscustomobject]@{ Ok = $goodOk; Label = '好样本 good.adapter.json 判 PASS（校验器不是一律红）'; Detail = $goodDetail })
+        $byFile = @{}
+        foreach ($r in $results) { $byFile[(Split-Path -Leaf $r.file)] = $r }
 
-        $brokenFiles = @($results | Where-Object { $_.file -notlike '*good.adapter.json' })
+        function Get-FixtureRules {
+            param($Result)
+            $ids = @()
+            if ($null -ne $Result) {
+                foreach ($e in @($Result.errors)) {
+                    $m = [regex]::Match($e, '^\[(E-[A-Z]+)\]')
+                    if ($m.Success -and ($ids -notcontains $m.Groups[1].Value)) { $ids += $m.Groups[1].Value }
+                }
+            }
+            return $ids
+        }
+
+        $goodFixtures = @('good.adapter.json', 'good-partial.adapter.json', 'good-noargs.adapter.json')
+        $greenMiss = @($goodFixtures | Where-Object { -not $byFile.ContainsKey($_) -or $byFile[$_].status -ne 'PASS' })
+        $greenDetail = @($greenMiss | ForEach-Object {
+                $errs = ''
+                if ($byFile.ContainsKey($_)) { $errs = (@($byFile[$_].errors) -join ' | ') }
+                '{0}: {1}' -f $_, $errs
+            }) -join ' ; '
+        $assertions.Add([pscustomobject]@{
+            Ok = ($greenMiss.Count -eq 0)
+            Label = ('正例全部判 PASS（{0} 条）' -f $goodFixtures.Count)
+            Detail = ('未绿：{0}' -f $greenDetail)
+        })
+
+        # args 键名闸门的两个正例：单独断言，证明「只查 args 键 ⊆ 参数」而不是反查
+        $partial = $byFile['good-partial.adapter.json']
+        $partialRules = @(Get-FixtureRules $partial)
+        $assertions.Add([pscustomobject]@{
+            Ok = ($null -ne $partial -and $partial.status -eq 'PASS' -and $partialRules.Count -eq 0)
+            Label = 'E-ARGNAME 正例：writeBack/optional 只给部分 args（-Items/-Item 由装配层注入）仍判 PASS'
+            Detail = ('status={0} rules={1}' -f $partial.status, ($partialRules -join ','))
+        })
+
+        $noArg = $byFile['good-noargs.adapter.json']
+        $noArgRules = @(Get-FixtureRules $noArg)
+        $assertions.Add([pscustomobject]@{
+            Ok = ($null -ne $noArg -and $noArg.status -eq 'PASS' -and $noArgRules.Count -eq 0)
+            Label = 'E-ARGNAME 正例：函数无具名参数 + args {} 仍判 PASS'
+            Detail = ('status={0} rules={1}' -f $noArg.status, ($noArgRules -join ','))
+        })
+
+        $brokenFiles = @($results | Where-Object { $goodFixtures -notcontains (Split-Path -Leaf $_.file) })
         $allRed = ($brokenFiles.Count -ge 5) -and (@($brokenFiles | Where-Object { $_.status -ne 'FAIL' }).Count -eq 0)
         $stillGreen = @($brokenFiles | Where-Object { $_.status -ne 'FAIL' } | ForEach-Object { $_.file }) -join ', '
         $assertions.Add([pscustomobject]@{ Ok = $allRed; Label = ('坏样本全部判 FAIL（{0} 个）' -f $brokenFiles.Count); Detail = ('未判红：{0}' -f $stillGreen) })
+
+        # 负例 1：拼错的 args 键名必须判 E-ARGNAME，且报错要带描述文件/槽位/键名/函数名/真实参数表
+        $typo = $byFile['badarg.adapter.json']
+        $typoMsgs = @()
+        if ($typo) { $typoMsgs = @($typo.errors | Where-Object { $_ -match '^\[E-ARGNAME\]' }) }
+        $typoOk = ($null -ne $typo) -and ($typo.status -eq 'FAIL') -and ($typoMsgs.Count -eq 1) -and
+            ($typoMsgs[0] -match 'badarg\.adapter\.json') -and
+            ($typoMsgs[0] -match 'listItems\.args\.TaskFile') -and
+            ($typoMsgs[0] -match 'Get-PatrolItems') -and
+            ($typoMsgs[0] -match '真实参数：\[TasksFile\]')
+        $typoDetail = '未出 E-ARGNAME'
+        if ($typoMsgs.Count -gt 0) { $typoDetail = $typoMsgs[0] }
+        $assertions.Add([pscustomobject]@{
+            Ok = $typoOk
+            Label = 'E-ARGNAME 负例：args 键名拼错（TaskFile）必须红且带真实参数表'
+            Detail = $typoDetail
+        })
+
+        # 负例 2：仅大小写不同也必须红（逐字对齐比 PS 绑定更严）
+        $caseRes = $byFile['badcase.adapter.json']
+        $caseMsgs = @()
+        if ($caseRes) { $caseMsgs = @($caseRes.errors | Where-Object { $_ -match '^\[E-ARGNAME\]' }) }
+        $caseOk = ($null -ne $caseRes) -and ($caseRes.status -eq 'FAIL') -and ($caseMsgs.Count -eq 1) -and
+            ($caseMsgs[0] -match 'writeBack\.args\.tasksfile') -and ($caseMsgs[0] -match '大小写不符')
+        $caseDetail = '未出 E-ARGNAME'
+        if ($caseMsgs.Count -gt 0) { $caseDetail = $caseMsgs[0] }
+        $assertions.Add([pscustomobject]@{
+            Ok = $caseOk
+            Label = 'E-ARGNAME 负例：args 键名大小写不符（tasksfile）必须红并提示真实参数'
+            Detail = $caseDetail
+        })
+
+        # 负例 3：函数不存在时走 E-FUNC，不得跟着误报 E-ARGNAME（没参数表就不猜）
+        $fnRes = $byFile['badfn.adapter.json']
+        $fnRules = @(Get-FixtureRules $fnRes)
+        $fnOk = ($null -ne $fnRes) -and ($fnRes.status -eq 'FAIL') -and
+            ($fnRules -contains 'E-FUNC') -and ($fnRules -notcontains 'E-ARGNAME')
+        $assertions.Add([pscustomobject]@{
+            Ok = $fnOk
+            Label = 'E-ARGNAME 负例：槽位函数不存在时只报 E-FUNC（不误报 E-ARGNAME）'
+            Detail = ('rules={0}' -f ($fnRules -join ','))
+        })
 
         $seenRules = @()
         foreach ($r in $results) {
@@ -602,7 +934,7 @@ function Resolve-ItemName { param($Item) return 'sample' }
                 if ($m.Success -and ($seenRules -notcontains $m.Groups[1].Value)) { $seenRules += $m.Groups[1].Value }
             }
         }
-        $expectedRules = @('E-JSON', 'E-REQ', 'E-TYPE', 'E-ENUM', 'E-EMPTY', 'E-DUP', 'E-FILENAME', 'E-ABS', 'E-MODULE', 'E-FUNC', 'E-PLACEHOLDER', 'E-OPTIONAL', 'E-UNKNOWN')
+        $expectedRules = @('E-JSON', 'E-REQ', 'E-TYPE', 'E-ENUM', 'E-EMPTY', 'E-DUP', 'E-FILENAME', 'E-ABS', 'E-MODULE', 'E-FUNC', 'E-PLACEHOLDER', 'E-OPTIONAL', 'E-UNKNOWN', 'E-ARGNAME')
         $missingRules = @($expectedRules | Where-Object { $seenRules -notcontains $_ })
         $assertions.Add([pscustomobject]@{
             Ok = ($missingRules.Count -eq 0)
@@ -635,6 +967,7 @@ function Resolve-ItemName { param($Item) return 'sample' }
 Write-Host 'adapters spec drift check (references/adapter-spec.md §10/§11, 只读)'
 Write-Host ('adapterDir = {0}' -f $AdapterDir)
 Write-Host 'policy: 未知顶层键 => FAIL（strict，防拼写漂移）; 缺 optional => WARN; ${...} 必须在 config 中，${tasksFile} 例外'
+Write-Host 'policy: args 键名必须是该槽位 function 真实声明的具名参数（E-ARGNAME，逐字/大小写敏感；只查 args 键 ⊆ 参数）'
 
 $results = Invoke-SpecCheck -Dir $AdapterDir -Root $descriptorRoot
 Write-SpecResults -Results $results -Title 'adapters'

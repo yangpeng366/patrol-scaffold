@@ -60,9 +60,13 @@ pwsh -NoProfile -File scripts/adapter-contract-test.ps1 -Provider <name> # 只�
 
 `verify-adapter-spec.ps1` 扫 `adapters/*.adapter.json`，逐项校验：必需键齐全且类型正确、provider 唯一且与文件名一致、
 `module` 是相对路径且文件存在、`kind` 在允许值内、每个声明的函数 dot-source 后确实存在（只读，不跑写回）、
-args 里的 `${...}` 占位能在 `config` 中解析（`${tasksFile}` 例外，由装配层统一注入）、`optional` 必须是对象。
+args 里的 `${...}` 占位能在 `config` 中解析（`${tasksFile}` 例外，由装配层统一注入）、
+**每个槽位 `args` 的键名必须是该槽位 `function` 在模块 `param(...)` 里真实声明的具名参数**
+（`E-ARGNAME`，逐字比较、大小写也算不同；只查 `args` 键 ⊆ 参数，`-Items`/`-Item` 由装配层注入所以不要求出现在 `args` 里）、
+`optional` 必须是对象。
 **未知顶层键按 FAIL 处理、不忽略**（拼错成 `writeback` 会被装配层静默取默认值）；缺 `optional` 键只 WARN。
-失败 `exit 1`，并自带一段坏样本自证（在 %TEMP% 造好/坏样本，断言 13 类规则都会红、好样本仍是绿的，不污染仓库）。
+失败 `exit 1`，并自带一段坏样本自证（在 %TEMP% 造 3 条好样本 + 9 条坏样本，断言 14 类规则都会红、好样本仍是绿的，不污染仓库；
+其中 `args` 键名闸门是 3 负 2 正：拼错 / 大小写不符 / 函数不存在各一条，部分参数与无参数各一条正例）。
 
 `adapter-contract-test.ps1` 遍历全部描述文件，逐个 provider 打 `[PASS]/[SKIP]/[FAIL]`；缺模块、缺函数会点名报错
 （包括 `optional` 里的能力型函数），不会静默跳过；需凭据的 provider 仍是 SKIP 而非 FAIL。

@@ -107,11 +107,15 @@ types; provider non-empty, unique and matching the file name; `module` a relativ
 exists; `kind` in `file|cli|api`; every declared `function` (three slots plus
 `optional.<slot>`) actually defined by the module after a **read-only** dot-source — the
 write-back function is never called; every `${...}` placeholder in `args` resolvable from
-`config` (`${tasksFile}` excepted, the assembly layer injects it); `optional` an object.
+`config` (`${tasksFile}` excepted, the assembly layer injects it); **every `args` key in a
+slot is one of the named parameters that slot's `function` really declares** (`E-ARGNAME`,
+compared literally so casing counts; only `args` keys ⊆ declared parameters is enforced —
+`-Items`/`-Item` are injected by the assembly layer and must not appear in `args`);
+`optional` an object.
 Unknown top-level keys are a **failure, not ignored** — a typo'd `writeback` would otherwise
 be silently defaulted; a missing `optional` key is only a WARN. Non-zero exit on any failure,
 and the script ships a self-test that builds good/broken fixtures in %TEMP% and asserts all
-13 rules really go red while the good one stays green, so a green run can be believed.
+14 rules really go red while the good ones stay green, so a green run can be believed.
 
 `adapter-contract-test.ps1` loops all descriptors, prints `[PASS]/[SKIP]/[FAIL]` per provider,
 and names a missing module or missing function explicitly (including capability functions

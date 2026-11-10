@@ -64,9 +64,9 @@
 | `needsNetwork` | **bool** | 必须是 JSON `true`/`false` | 仅声明 |
 | `description` | string | 空只 WARN（`W-DESC`） | 人读 |
 | `config` | object | 值必须是标量（非标量 WARN `W-CONFIG`） | 提供 `${...}` 的默认值 |
-| `listItems` | object | `{ function, args }`，`function` 非空且在模块里存在 | `Get-PatrolProviderItems` |
-| `writeBack` | object | 同上 | `Save-PatrolProviderItems` |
-| `resolveName` | object | 同上 | `Resolve-PatrolProviderName` |
+| `listItems` | object | `{ function, args }`，`function` 非空且在模块里存在；`args` 键须逐字等于该函数的具名参数（`E-ARGNAME`） | `Get-PatrolProviderItems` |
+| `writeBack` | object | 同上（`-Items` 由装配层注入，不要求出现在 `args` 里） | `Save-PatrolProviderItems` |
+| `resolveName` | object | 同上（`-Item` 由装配层注入） | `Resolve-PatrolProviderName` |
 | `optional` | object | **缺键只 WARN**；写了就必须是对象，子槽必须是 `{ function, args }` | 目前只消费 `optional.syncBack` |
 
 三条硬口径（`verify-adapter-spec.ps1` 文件头已写死，这里复述以免踩）：
@@ -149,18 +149,38 @@ function <能力函数>       { param(...) }   # 仅当描述文件写了 option
 `resolveName` 的四家实现都是 `param($Item)`：**不要**给它加 `[Parameter(Mandatory)]`，装配层已经把
 `-Item` 按名字传进去了，再加 Mandatory 只会让空 item 从「返回空」变成「抛错」。
 
-### 3.4 一个必须知道的坑：args 名写错未必报错
+### 3.4 `args` 键名必须是模块里的具名参数（`E-ARGNAME`）
 
-`verify-adapter-spec.ps1` **不校验** `args` 的键是否等于模块参数名（它只校验 `${占位}` 能在 `config` 里解析）。
-参数名对不上时：
+`verify-adapter-spec.ps1` 从 `module` 指向的 `.ps1` 里抽出每个 `function ... param(...)` 的具名参数
+（用 PowerShell 自带 parser 的 AST，不是正则：跨行参数表、`[Parameter(...)]` 属性、默认值里的括号/字符串、
+注释里的 `( )` 都由它配平；只解析、不执行模块），然后要求**每个槽位 `args` 的键都是该槽位 `function`
+真实声明的参数**，逐字比较（大小写也算不同）：
+
+```
+[E-ARGNAME] adapters/x.adapter.json: listItems.args.Csvpath 不是函数 Get-PatrolItems 的具名参数
+            （大小写不符，真实参数是 'CsvPath'；函数定义于 scripts/x-adapter.ps1:183；
+             该函数真实参数：[CsvPath, TasksFile, ColumnMap]）
+```
+
+方向只有一个：**`args` 键 ⊆ 函数具名参数**。不要反过来要求「函数的每个参数都必须出现在 `args` 里」——
+`-Items` / `-Item` 是装配层写死注入的（§3.2），`adapters/bitable.adapter.json` 的 `writeBack` 就只写 `TasksFile`，
+反查会把它误判成红。函数不存在时只报 `E-FUNC`（拿不到参数表就不猜，不跟着刷 `E-ARGNAME`）。
+`-Verbose` / `-ErrorAction` 这类公共参数不算「模块声明的具名参数」，不要写进 `args`。
+
+为什么必须静态挡：参数名对不上时，
 
 - 模块函数是**高级函数**（参数上带任何 `[Parameter(...)]` 属性）→ 实跑时报
   `找不到与参数名称 'CsvPath' 匹配的参数。`（zh-CN PowerShell 原文；en-US 为
   `A parameter cannot be found that matches parameter name 'CsvPath'.`）
 - 模块函数是**简单函数**（`param([string]$X)` 无属性）→ 多出来的具名参数被静默收进 `$args`，
-  **不报错也不生效**，你的默认值悄悄接管。
+  **不报错也不生效**，你的默认值悄悄接管——真实轮次里只表现为「配置改了没生效」。
 
-所以「参数名与 `args` 键名逐字对齐」只能靠 §7 的契约自测实跑来兜底，别指望静态检查。
+两种都不该等到实跑才暴露，所以别只靠 §7 的契约自测兜底，这一关在提交前就必须绿。
+闸门自测（3 负 + 2 正）随脚本默认跑，可重跑命令：
+
+```powershell
+pwsh -NoProfile -File tests/verify-adapter-spec.ps1
+```
 
 ---
 
@@ -303,6 +323,7 @@ digest 里 `method` 必须等于 provider 名（取自 `$AdapterName`，不是�
 | `E-MODULE module 无法 dot-source：（...）` | 模块顶层就抛错（读文件、读环境、依赖缺失） | 模块顶层只定义函数，动作留到被调用时 |
 | `E-SYNTAX 模块语法错误 scripts/x.ps1:12 ...` | 模块语法 | 按行号修 |
 | `E-FUNC 函数 'X' 在模块里不存在（dot-source 后未定义；引用它的槽：writeBack）` | 函数名不一致，或函数定义在 `if` 分支里 | 顶层 `function X {}`；名字与描述文件逐字一致 |
+| `E-ARGNAME ... listItems.args.Csvpath 不是函数 Get-PatrolItems 的具名参数（...；该函数真实参数：[CsvPath, ...]）` | `args` 键名与模块 `param(...)` 里的名字不一致（拼错 / 大小写） | 按报错里的「真实参数」逐字改；`-Items`/`-Item` 由装配层注入，不要写进 `args` |
 | `E-PLACEHOLDER ... 的占位 ${x} 在 config 里找不到（config 可用键：...）` | `args` 里的占位与 `config` 键不符 | 补 `config.x` 或改用 `${tasksFile}` |
 | `E-PLACEHOLDER ... 的占位未闭合` | `${x` | 补 `}` |
 | `E-OPTIONAL optional 必须是对象` / `optional.syncBack 必须是对象 { function, args }` | 写成了 `[]` 或字符串 | `{}` 或 `{ "function": "...", "args": {} }` |
@@ -325,7 +346,7 @@ digest 里 `method` 必须等于 provider 名（取自 `$AdapterName`，不是�
 | `模块 scripts/x.ps1 未定义 listItems.function 'F'（契约不满足）` | 函数名不一致 | 同上 `E-FUNC` |
 | `模块 scripts/x.ps1 未定义 optional.syncBack 声明的函数 'F'（到了该能力才炸的坑，这里提前报）` | 能力函数漏实现 | 实现它，或删掉该槽 |
 | `Get-PatrolProviderItems: provider=x 必填参数 'ConfigPath' 为空（描述文件声明为必填）` | 占位展开成空串（`config` 默认空且没注入） | 给默认值，或 `-Values`/环境变量注入 |
-| `找不到与参数名称 'CsvPath' 匹配的参数。` | `args` 键名 ≠ 模块参数名（高级函数才会报） | 逐字对齐 |
+| `找不到与参数名称 'CsvPath' 匹配的参数。` | `args` 键名 ≠ 模块参数名（高级函数才会报；静态已由 `E-ARGNAME` 提前挡） | 逐字对齐 |
 | `list-items() 返回 0 行` | 源为空，或过滤条件把行全筛掉 | 换样本；空源要显式 `return @()` 而不是抛错（空源算 FAIL 是刻意的） |
 | `item 'x': 缺必填字段 'priority'` / `字段 'priority' 取值 'P3' 不在 enum` | 归一后仍非法（适配器吐了奇怪的值） | 让归一兜住，或修源数据 |
 | `resolve-name() 返回空` | `Resolve-ItemName` 没返回值 | `return $Item.title`（空则回退 `id`） |

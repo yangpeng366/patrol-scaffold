@@ -144,6 +144,9 @@ function Resolve-ItemName  { param(...) }   # resolve-name()
 ```
 
 - `${token}` 由调用方注入（`-Values` 或环境变量 `PATROL_<PROVIDER>_<KEY>`）
+- 槽位 `args` 的键名必须是该槽位 `function` 在模块 `param(...)` 里真实声明的具名参数（逐字含大小写；
+  `verify-adapter-spec.ps1` 的 `E-ARGNAME` 会静态挡）。`-Items` / `-Item` 由装配层注入，不要写进 `args`；
+  反方向不要求：函数声明了但 `args` 没给的参数（如 `$Items`）是合法的
 - `optional` 放能力型函数（如 bitable 的 syncBack）；没有就留空对象
 
 ---
