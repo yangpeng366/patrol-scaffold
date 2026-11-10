@@ -65,17 +65,29 @@ function Import-PatrolProvider {
     if (-not (Test-Path -LiteralPath $modulePath)) {
         throw "Import-PatrolProvider: adapter module not found: $modulePath"
     }
+    # 快照必须在 dot-source 之前取：之后的同名函数已被本模块遮住，再比就永远相等。
     $beforeFns = @(Get-ChildItem -Path function: | Select-Object -ExpandProperty Name)
+    $beforeBody = @{}
+    foreach ($fnName in $beforeFns) {
+        $cmd = Get-Command -Name $fnName -CommandType Function -ErrorAction SilentlyContinue
+        if ($cmd) { $beforeBody[$fnName] = $cmd.ScriptBlock.ToString() }
+    }
     . $modulePath
     $afterFns = @(Get-ChildItem -Path function: | Select-Object -ExpandProperty Name)
-    # dot-source 发生在函数作用域，函数会随本函数退出而消失——须提升到脚本作用域，
+    # dot-source 发生在函数作用域，函数随本函数退出而消失——须提升到脚本作用域，
     # 否则返回后 Get-PatrolProviderItems 找不到契约函数。
-    # 模块的辅助函数与契约函数都可能在契约函数内部被调用，因此整批提升，
-    # 不只提升 listItems/writeBack/resolveName 三个入口。
-    $fnNames = @($afterFns | Where-Object { $beforeFns -notcontains $_ })
-    foreach ($fnName in ($fnNames | Select-Object -Unique)) {
+    # 各 provider 共用同一套函数名（Get-PatrolItems / Save-PatrolItems / Resolve-ItemName），
+    # 所以不能只提升「本次新增」的名字：先装 bitable、再装 local-json 时，后者会被前一家的同名
+    # 函数遮住，报「找不到参数 TasksFile」这类假错。按脚本块正文比较，凡被本模块改写的都重新提升。
+
+    $moduleFns = @{}
+    foreach ($fnName in @($afterFns | Select-Object -Unique)) {
         $cmd = Get-Command -Name $fnName -CommandType Function -ErrorAction SilentlyContinue
-        if ($cmd) { Set-Item -Path ("function:script:{0}" -f $fnName) -Value $cmd.ScriptBlock }
+        if (-not $cmd) { continue }
+        $body = $cmd.ScriptBlock.ToString()
+        if ($beforeBody.ContainsKey($fnName) -and $beforeBody[$fnName] -eq $body) { continue }
+        Set-Item -Path ("function:script:{0}" -f $fnName) -Value $cmd.ScriptBlock
+        $moduleFns[$fnName] = $cmd.ScriptBlock
     }
 
     foreach ($slot in @('listItems', 'writeBack', 'resolveName')) {
@@ -106,6 +118,7 @@ function Import-PatrolProvider {
         Provider   = $Provider
         Descriptor = $d
         ModulePath = $modulePath
+        ModuleFns  = $moduleFns
         Values     = $merged
     }
 }
@@ -157,12 +170,24 @@ function ConvertTo-PatrolItem {
     return [pscustomobject]$out
 }
 
+function Install-PatrolProviderFunctions {
+    # 把某个 provider 自己的函数集合重新装到脚本作用域。
+    # 同进程内装过第二家 provider 后，同名契约函数（Get-PatrolItems 等）会被后装的那家遮住；
+    # 所以每个入口调用前先按 provider 复位，不让调用顺序决定调用了谁的代码。
+    param([Parameter(Mandatory)]$Provider)
+    if (-not $Provider.ModuleFns) { return }
+    foreach ($k in @($Provider.ModuleFns.Keys)) {
+        Set-Item -Path ("function:script:{0}" -f $k) -Value $Provider.ModuleFns[$k]
+    }
+}
+
 function Get-PatrolProviderItems {
     # list-items()
     param(
         [Parameter(Mandatory)]$Provider,
         [hashtable]$Extra = @{}
     )
+    Install-PatrolProviderFunctions -Provider $Provider
     $spec = $Provider.Descriptor.listItems
     $vals = @{} + $Provider.Values + $Extra
     $args = Expand-PatrolAdapterArgs -ArgSpec $spec.args -Values $vals
@@ -181,6 +206,7 @@ function Save-PatrolProviderItems {
         [Parameter(Mandatory)]$Items,
         [hashtable]$Extra = @{}
     )
+    Install-PatrolProviderFunctions -Provider $Provider
     $spec = $Provider.Descriptor.writeBack
     $vals = @{} + $Provider.Values + $Extra
     $args = Expand-PatrolAdapterArgs -ArgSpec $spec.args -Values $vals
@@ -194,6 +220,7 @@ function Resolve-PatrolProviderName {
         [Parameter(Mandatory)]$Provider,
         [Parameter(Mandatory)]$Item
     )
+    Install-PatrolProviderFunctions -Provider $Provider
     $spec = $Provider.Descriptor.resolveName
     $args = Expand-PatrolAdapterArgs -ArgSpec $spec.args -Values $Provider.Values
     $fn = $spec.function
@@ -208,6 +235,7 @@ function Sync-PatrolProviderRoundResult {
         [hashtable]$Extra = @{}
     )
     $opt = $Provider.Descriptor.optional
+    Install-PatrolProviderFunctions -Provider $Provider
     if ($null -eq $opt -or $null -eq $opt.syncBack) { return $false }
     $vals = @{} + $Provider.Values + $Extra
     $args = Expand-PatrolAdapterArgs -ArgSpec $opt.syncBack.args -Values $vals

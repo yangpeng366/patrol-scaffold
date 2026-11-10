@@ -126,5 +126,6 @@ editing `patrol-loop.ps1`, the contract has a hole: fix the contract first.
 - `tests/verify-no-secrets.ps1` - 密钥卫生门禁：`git ls-files` 全量扫受控文件（token 形态 / Bearer /
   凭据变量赋字面量 / AK-IA / gh-p_），并断言两个 JEV verify 脚本只从环境变量或仓库外密钥文件读；命中 FAIL 非零退出。
 - `tests/verify-secret-history.ps1` - 历史盘点（`git log -p --all`），只报告命中提交/文件 + 轮换建议，永不失败、不改历史。
+- `tests/verify-provider-isolation.ps1` - 装配层回归：三个 provider 同名函数（Get-PatrolItems 等）同进程依次装配时互不串味；老实现必红。
 - `references/local-json-adapter.md` - provider=local-json 适配器文档 + 拷贝即跑 dry-run 指南。
 - `scripts/` - 最小可跑参考实现：`local-json-adapter.ps1`（源适配器）+ `patrol-provider.ps1`（适配器装配层）+ `adapter-contract-test.ps1`（契约自测）+ `patrol-loop.ps1`（due-list/worker 池/回写/digest，worker 默认 dry-run）+ `sample-tasks.json`（示例任务）。

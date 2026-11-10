@@ -75,6 +75,7 @@ pwsh -File patrol-loop.ps1 -TasksFile sample-tasks.json -Once -DryRun
 - `references/external-dependencies.md` — 外部依赖索引（权威源 / 取法 / 降级），**不随仓分发**
 - `references/scheduled-task-recipe.md` — 触发器层注册 recipe
 - `tests/verify-no-secrets.ps1` — 密钥卫生门禁：扫全部受控文件，命中即非零退出
+- `tests/verify-provider-isolation.ps1` — 多 provider 同进程同名函数不串味（装配层回归）
 - `tests/verify-secret-history.ps1` — 历史密钥盘点：只报告命中提交，不改历史
 - `.githooks/pre-commit` — 把门禁挂到提交前：`git config core.hooksPath .githooks`
 
