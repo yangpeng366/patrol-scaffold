@@ -21,3 +21,7 @@ tests/verify-shadow-decision-hint.ps1
 tests/fixtures/
 Start-CodexAutoPatrolLoop.ps1
 scripts/JevDecision.ps1
+
+# Python 测试产物（mock adapter 自测会生成）
+__pycache__/
+*.pyc

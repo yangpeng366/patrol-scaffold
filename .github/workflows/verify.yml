@@ -74,7 +74,7 @@ jobs:
       # （静态闸门要 schemas，e2e 闸门要 src，都按 fetch-depth 1 取），再用显式路径指过去。
       # 显式给路就一定要读到文件，读不到直接 FAIL（两个脚本对「显式指路指空」都判红），
       # 所以 CI 上它们是真闸门。公开仓用默认 GITHUB_TOKEN、不需要新增 secret。
-      - name: Checkout dsh-patrol (cross-repo gate input: schema + source)
+      - name: "Checkout dsh-patrol (cross-repo gate input: schema + source)"
         uses: actions/checkout@v4
         with:
           repository: yangpeng366/dsh-patrol
