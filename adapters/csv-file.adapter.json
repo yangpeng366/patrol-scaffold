@@ -1,0 +1,23 @@
+{
+  "provider": "csv-file",
+  "title": "本地 CSV 文件",
+  "module": "scripts/csv-file-adapter.ps1",
+  "kind": "file",
+  "needsCredentials": false,
+  "needsNetwork": false,
+  "description": "数据源是一个本地 CSV 文件，一行一条任务方向：Import-Csv 解析、列映射可配置、必填列缺失即报错、写回只改目标行的指定列并保留其余字节。零网络零凭据，适合离线/内网与教学。",
+  "config": {
+    "csvPath": "scripts/sample-tasks.csv",
+    "columnMap": "id=id;title=title;priority=priority;interval=interval;status=status;action=action;note=note"
+  },
+  "listItems": {
+    "function": "Get-PatrolItems",
+    "args": { "CsvPath": "${csvPath}", "TasksFile": "${tasksFile}", "ColumnMap": "${columnMap}" }
+  },
+  "writeBack": {
+    "function": "Save-PatrolItems",
+    "args": { "CsvPath": "${csvPath}", "TasksFile": "${tasksFile}", "ColumnMap": "${columnMap}" }
+  },
+  "resolveName": { "function": "Resolve-ItemName", "args": {} },
+  "optional": {}
+}

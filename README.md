@@ -42,7 +42,7 @@ pwsh -File adapter-contract-test.ps1      # 契约自测：适配器装配 + 每
 pwsh -File patrol-loop.ps1 -TasksFile sample-tasks.json -Once -DryRun
 ```
 
-预期：契约自测 `pass=1 skip=2 fail=0`（bitable / tencent-docs 无凭据时为 SKIP 而非 FAIL）；
+预期：契约自测 `pass=2 skip=2 fail=0`（csv-file / local-json 实跑，bitable / tencent-docs 无凭据时为 SKIP 而非 FAIL）；
 `due=3/3`，三个 worker 完成，`sample-tasks.json` 的 `lastRun` 被回写，digest 落在
 `downloads/patrol-<ts>.json|.md`。立即重跑：`due=0/3`（证 per-row interval 过滤生效）。
 
@@ -68,16 +68,20 @@ pwsh -File patrol-loop.ps1 -TasksFile sample-tasks.json -Once -DryRun
 - `schemas/item.schema.json` — item 契约唯一事实源
 - `adapters/*.adapter.json` — provider 声明式描述（模块 / 配置 / 契约函数）
 - `adapters/tencent-docs.adapter.json` + `scripts/tencent-docs-adapter.ps1` — 腾讯文档智能表格（第二类真实适配器）
+- `adapters/csv-file.adapter.json` + `scripts/csv-file-adapter.ps1` — 本地 CSV 文件（第三类适配器，零网络零凭据；`Import-Csv` 解析、列映射可配、写回只改目标行）
 - `scripts/patrol-provider.ps1` — 适配器装配层（导入、归一、调用）
 - `scripts/adapter-contract-test.ps1` — 适配器契约自测（离线校验器）
 - `tests/verify-tencent-docs-adapter.ps1` — tencent-docs 端到端自测（本地 mock 服务，无需真凭据）
+- `tests/verify-csv-file-adapter.ps1` — csv-file 离线自测（%TEMP% 沙箱：列映射 / 引号逗号换行 / 缺列报错 / 写回字节保真 / 无 BOM）
 - `docs/tencent-docs-adapter.md` — tencent-docs 的 11 节适配器规格与落地待办
+- `references/csv-file-adapter.md` — csv-file 的 11 节适配器规格 + 「这类源什么时候该用 / 不该用」
 - `references/external-dependencies.md` — 外部依赖索引（权威源 / 取法 / 降级），**不随仓分发**
 - `references/scheduled-task-recipe.md` — 触发器层注册 recipe
 - `tests/verify-no-secrets.ps1` — 密钥卫生门禁：扫全部受控文件，命中即非零退出
 - `tests/verify-provider-isolation.ps1` — 多 provider 同进程同名函数不串味（装配层回归）
 - `tests/verify-secret-history.ps1` — 历史密钥盘点：只报告命中提交，不改历史
 - `.githooks/pre-commit` — 把门禁挂到提交前：`git config core.hooksPath .githooks`
+- `.github/workflows/verify.yml` — CI（windows-latest / shell: pwsh）：契约自测 + csv-file 离线自测 + 密钥卫生
 
 ## License
 

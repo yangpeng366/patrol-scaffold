@@ -1,0 +1,41 @@
+name: verify
+
+# 门槛只做三件事：契约自测（每个 provider 过同一把尺子）、csv-file 离线自测、密钥卫生。
+# 全部离线：不装依赖、不联网取数据、不需要任何凭据。
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    name: pwsh gates (windows-latest)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # 保持仓库原样换行，避免 CSV 与源码被 autocrlf 改写后与本地不一致
+          fetch-depth: 1
+
+      - name: Show PowerShell version
+        shell: pwsh
+        run: |
+          $PSVersionTable.PSVersion.ToString()
+          $PSVersionTable.PSEdition
+
+      - name: Adapter contract test (all providers)
+        shell: pwsh
+        run: pwsh -NoProfile -File scripts/adapter-contract-test.ps1
+
+      - name: csv-file adapter self-test
+        shell: pwsh
+        run: pwsh -NoProfile -File tests/verify-csv-file-adapter.ps1
+
+      - name: Secret hygiene gate
+        shell: pwsh
+        run: pwsh -NoProfile -File tests/verify-no-secrets.ps1

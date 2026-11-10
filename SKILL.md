@@ -23,7 +23,7 @@ pwsh -File tests/verify-state-externalization.ps1
 pwsh -File scripts/patrol-loop.ps1 -TasksFile scripts/sample-tasks.json -Once -DryRun
 ```
 
-Expected: contract test `pass=1 skip=1 fail=0` (bitable is SKIP without
+Expected: contract test `pass=2 skip=2 fail=0` (bitable / tencent-docs are SKIP without
 credentials, never FAIL); state test `state externalization: PASS`; `due=3/3`,
 three workers complete, runtime state lands in `state/patrol-state.json` while
 `sample-tasks.json` stays read-only, digest lands in `downloads/patrol-<ts>.json|.md`.
@@ -128,4 +128,5 @@ editing `patrol-loop.ps1`, the contract has a hole: fix the contract first.
 - `tests/verify-secret-history.ps1` - 历史盘点（`git log -p --all`），只报告命中提交/文件 + 轮换建议，永不失败、不改历史。
 - `tests/verify-provider-isolation.ps1` - 装配层回归：三个 provider 同名函数（Get-PatrolItems 等）同进程依次装配时互不串味；老实现必红。
 - `references/local-json-adapter.md` - provider=local-json 适配器文档 + 拷贝即跑 dry-run 指南。
-- `scripts/` - 最小可跑参考实现：`local-json-adapter.ps1`（源适配器）+ `patrol-provider.ps1`（适配器装配层）+ `adapter-contract-test.ps1`（契约自测）+ `patrol-loop.ps1`（due-list/worker 池/回写/digest，worker 默认 dry-run）+ `sample-tasks.json`（示例任务）。
+- `references/csv-file-adapter.md` - provider=csv-file 的 11 节规格：本地 CSV 源（零网络零凭据），含「什么时候该用 / 不该用」与已知边界。
+- `scripts/` - 最小可跑参考实现：`local-json-adapter.ps1`（源适配器）+ `csv-file-adapter.ps1`（CSV 源适配器，`Import-Csv` 解析、列映射可配、写回只改目标行且无 BOM）+ `patrol-provider.ps1`（适配器装配层）+ `adapter-contract-test.ps1`（契约自测）+ `patrol-loop.ps1`（due-list/worker 池/回写/digest，worker 默认 dry-run）+ `sample-tasks.json` / `sample-tasks.csv`（示例任务）。

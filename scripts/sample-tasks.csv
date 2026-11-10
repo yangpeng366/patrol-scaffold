@@ -1,0 +1,4 @@
+id,title,priority,interval,status,action,note
+csv-A,示例项目A-紧急,P0,0,待开始,跑通 dry-run,演示 P0 且 interval=0 视为每轮到期
+csv-B,示例项目B-常规,P2,1440,待开始,等下一轮,演示 1440 分钟间隔
+csv-C,示例项目C-中等,P1,0,待开始,推进中,演示 P1 与间隔列留空
