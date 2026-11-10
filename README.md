@@ -69,8 +69,7 @@ pwsh -File patrol-loop.ps1 -TasksFile sample-tasks.json -Once -DryRun
 - `adapters/*.adapter.json` — provider 声明式描述（模块 / 配置 / 契约函数）
 - `scripts/patrol-provider.ps1` — 适配器装配层（导入、归一、调用）
 - `scripts/adapter-contract-test.ps1` — 适配器契约自测（离线校验器）
-- `references/codex-global-rules.md` — Codex 全局规约快照（活文件为准）
-- `references/textfile-helper.md` — `TextFile.ps1` 写盘 / 通知 helper API
+- `references/external-dependencies.md` — 外部依赖索引（权威源 / 取法 / 降级），**不随仓分发**
 - `references/scheduled-task-recipe.md` — 触发器层注册 recipe
 
 ## License
@@ -79,4 +78,5 @@ MIT — 见 [LICENSE](LICENSE)。
 
 ---
 
-> 注：`references/codex-global-rules.md` 与 `textfile-helper.md` 为「快照 + 活文件为准」参考资料，落地前请重读其指向的活文件。
+> 注：本仓**不含任何外部依赖副本**。规约、helper 一律读活文件或由 agent 自行下载，
+> 取法见 `references/external-dependencies.md`；取不到时按该页「最小纪律」办。

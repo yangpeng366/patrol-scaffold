@@ -114,8 +114,7 @@ editing `patrol-loop.ps1`, the contract has a hole: fix the contract first.
 - `references/patrol-blueprint.md` - full architecture, real params, two concretizations (Feishu live / 腾讯文档 swap-in), "apply to other needs" 13-step checklist, anti-patterns.
 - `schemas/item.schema.json` - item contract (single source of truth).
 - `adapters/*.adapter.json` - declarative provider descriptors.
-- `references/codex-global-rules.md` - Codex 全局规约快照（活文件 E:\AI-Portable\codex-home\AGENTS.md 为权威源）：UTF-8 无 BOM、pwsh shell 纪律、改文件优先 helper、飞书通禀、文件失寻恢复。
-- `references/textfile-helper.md` - TextFile.ps1 API（Set/Add/Get-TextFile、Set-TextFilePatch、BOM 扫除、Send-LarkText），巡检写盘与通知的手术刀。活文件 D:\gitAll\auto-deploy\_lib\TextFile.ps1。
+- `references/external-dependencies.md` - 外部依赖索引：Codex 全局规约、TextFile.ps1、lark-cli、lark-base-helpers.ps1、codex CLI —— 只记「权威源在哪 / 怎么取 / 取不到怎么办」，**不随仓分发**；取不到时的最小纪律底线也在该页。
 - `references/scheduled-task-recipe.md` - 触发器层：计划任务 round 模型（首选）/ Register-ScheduledTask 模板 / nssm 常驻、看门狗、三条不变量、真实实例与踩坑。
 - `references/local-json-adapter.md` - provider=local-json 适配器文档 + 拷贝即跑 dry-run 指南。
 - `scripts/` - 最小可跑参考实现：`local-json-adapter.ps1`（源适配器）+ `patrol-provider.ps1`（适配器装配层）+ `adapter-contract-test.ps1`（契约自测）+ `patrol-loop.ps1`（due-list/worker 池/回写/digest，worker 默认 dry-run）+ `sample-tasks.json`（示例任务）。
