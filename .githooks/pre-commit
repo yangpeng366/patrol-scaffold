@@ -1,0 +1,5 @@
+#!/bin/sh
+# Secret hygiene gate (SKILL.md > Safety). `git ls-files` reads the index, so
+# files added with `git add` are covered even before the commit exists.
+root=$(git rev-parse --show-toplevel) || exit 1
+exec pwsh -NoProfile -File "$root/tests/verify-no-secrets.ps1"

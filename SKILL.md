@@ -105,7 +105,12 @@ editing `patrol-loop.ps1`, the contract has a hole: fix the contract first.
 ## Safety (non-negotiable)
 
 - READ-ONLY in the source system unless sync-back is explicitly enabled.
-- No credentials to any file; never commit secrets.
+- 密钥卫生（最小纪律，本仓强制）：密钥只从环境变量（如 `$env:TYPESAFE_API_KEY`）或仓库外的
+  密钥文件读（`~/.openclaw/secrets/typesafe.key` 一类）；仓内任何位置——SKILL.md /
+  references / scripts / tests / fixtures——不得出现明文。提交前跑
+  `pwsh -File tests/verify-no-secrets.ps1`，非零退出不得提交；报错、日志、工单里只写前缀 + 长度。
+  历史命中用 `pwsh -File tests/verify-secret-history.ps1` 只做盘点，不自动改历史：命中即视为已泄露，
+  只轮换密钥并收紧读取路径，不硬改历史（force-push 清不掉协作者克隆、镜像与 reflog 里的旧对象）。
 - Correlator only reads `git status/log`; never commit/push.
 - Workers do bounded, reversible local work; no publish / external mutation
   unless the row explicitly opts in.
@@ -118,5 +123,8 @@ editing `patrol-loop.ps1`, the contract has a hole: fix the contract first.
 - `adapters/*.adapter.json` - declarative provider descriptors.
 - `references/external-dependencies.md` - 外部依赖索引：Codex 全局规约、TextFile.ps1、lark-cli、lark-base-helpers.ps1、codex CLI —— 只记「权威源在哪 / 怎么取 / 取不到怎么办」，**不随仓分发**；取不到时的最小纪律底线也在该页。
 - `references/scheduled-task-recipe.md` - 触发器层：计划任务 round 模型（首选）/ Register-ScheduledTask 模板 / nssm 常驻、看门狗、三条不变量、真实实例与踩坑。
+- `tests/verify-no-secrets.ps1` - 密钥卫生门禁：`git ls-files` 全量扫受控文件（token 形态 / Bearer /
+  凭据变量赋字面量 / AK-IA / gh-p_），并断言两个 JEV verify 脚本只从环境变量或仓库外密钥文件读；命中 FAIL 非零退出。
+- `tests/verify-secret-history.ps1` - 历史盘点（`git log -p --all`），只报告命中提交/文件 + 轮换建议，永不失败、不改历史。
 - `references/local-json-adapter.md` - provider=local-json 适配器文档 + 拷贝即跑 dry-run 指南。
 - `scripts/` - 最小可跑参考实现：`local-json-adapter.ps1`（源适配器）+ `patrol-provider.ps1`（适配器装配层）+ `adapter-contract-test.ps1`（契约自测）+ `patrol-loop.ps1`（due-list/worker 池/回写/digest，worker 默认 dry-run）+ `sample-tasks.json`（示例任务）。
