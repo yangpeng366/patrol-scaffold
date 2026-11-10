@@ -328,7 +328,7 @@ function Convert-TxRecordToItem {
 
     $priority = ([string](ConvertFrom-TxCell -Cell (Get-TxMappedCell -Values $v -FieldMap $fm -Key 'priority') -Kind 'text')).Trim().ToUpperInvariant()
 
-    $interval = 60   # 与 BitAbleAdapter / patrol-loop 的 DefaultIntervalMin 一致
+    $interval = 0    # 0/空 = 停跑；与 patrol-schedule.ps1 的停跑口径一致
     $intervalRaw = Get-TxMappedCell -Values $v -FieldMap $fm -Key 'interval'
     if ($null -ne $intervalRaw -and ([string]$intervalRaw).Trim() -ne '') {
         $n = 0

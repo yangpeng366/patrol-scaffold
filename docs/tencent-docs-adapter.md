@@ -119,7 +119,7 @@
 | `description` | 简要描述 | prompt 背景 |
 | `nextStep` | 下一步 | prompt 本轮目标 |
 | `priority` | 优先级（请填 `P0/P1/P2`） | 排序（P0 先）；非枚举值会被 `ConvertTo-PatrolItem` 降为 `P2` |
-| `intervalMin` | 巡检间隔(分钟) | 到期判定（数字列；空=60） |
+| `intervalMin` | 巡检间隔(分钟) | 到期判定（数字列；空/0 = 停跑，不进入调度） |
 | `threadId` | codex_thread_id | 续跑 |
 | `fake` | 假数据模式（复选框） | 演练开关 |
 | `lastRun` | 最近巡检时间（文本 ISO 或日期毫秒） | due 判定，空=到期 |

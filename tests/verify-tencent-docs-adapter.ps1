@@ -58,14 +58,17 @@ try {
 
     $provider = Import-PatrolProvider -Provider 'tencent-docs' -Values @{ configPath = $cfgPath; mirrorFile = $mirrorPath }
     $items = @(Get-PatrolProviderItems -Provider $provider)
-    Assert-True ($items.Count -eq 2) "two pages read, archived row filtered (got $($items.Count))"
+    Assert-True ($items.Count -eq 3) "two pages read, archived row filtered (got $($items.Count))"
     Assert-True ($items[0].id -eq 'recAAA') 'recordID becomes item id'
     Assert-True ($items[0].title -eq '示例项目A-紧急') 'title maps 项目名'
     Assert-True ($items[0].repoPath -eq 'D:\gitAll\demo-a') 'repoPath maps 仓库路径'
     Assert-True ($items[0].priority -eq 'P0') 'priority normalised to upper case'
     Assert-True ($items[0].intervalMin -eq 30) 'interval maps 巡检间隔(分钟)'
     Assert-True ($items[1].id -eq 'recCCC') 'second page record present'
+    Assert-True ($items[1].intervalMin -eq 0) 'explicit zero interval stays zero'
     Assert-True ($items[1].lastRun -like '2025-*' -or $items[1].lastRun -like '2026-*') 'epoch millis converted to ISO time'
+    Assert-True ($items[2].id -eq 'recDDD') 'record without interval is retained'
+    Assert-True ($items[2].intervalMin -eq 0) 'missing interval means stopped, not 60'
 
     $nm = Resolve-PatrolProviderName -Provider $provider -Item $items[0]
     Assert-True (-not [string]::IsNullOrWhiteSpace([string]$nm)) 'resolve-name returns a label'
@@ -73,7 +76,7 @@ try {
     Save-PatrolProviderItems -Provider $provider -Items $items | Out-Null
     Assert-True (Test-Path -LiteralPath $mirrorPath) 'write-back writes the local mirror'
     $mirror = @(Get-Content -LiteralPath $mirrorPath -Raw | ConvertFrom-Json)
-    Assert-True ($mirror.Count -eq 2) 'mirror holds both items'
+    Assert-True ($mirror.Count -eq 3) 'mirror holds all retained items'
 
     $bytes = [System.IO.File]::ReadAllBytes($mirrorPath)
     Assert-True (-not ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF)) 'mirror has no BOM'

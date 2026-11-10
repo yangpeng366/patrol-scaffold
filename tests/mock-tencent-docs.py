@@ -47,9 +47,9 @@ PAGE_TWO = {
     "ret": 0,
     "data": {
         "getRecords": {
-            "total": 3,
+            "total": 4,
             "hasMore": False,
-            "next": 3,
+            "next": 4,
             "records": [
                 {
                     "recordID": "recCCC",
@@ -59,6 +59,16 @@ PAGE_TWO = {
                         "优先级": [{"type": "text", "text": "P2"}],
                         "巡检间隔(分钟)": 0,
                         "最近巡检时间": [{"type": "text", "text": "1760000000000"}],
+                    },
+                }
+,
+                {
+                    "recordID": "recDDD",
+                    "values": {
+                        "项目名": [{"type": "text", "text": "示例项目D-未设间隔"}],
+                        "下一步": [{"type": "text", "text": "未配置间隔即停跑"}],
+                        "优先级": [{"type": "text", "text": "P2"}],
+                        "当前阶段": [{"type": "text", "text": "待处理"}],
                     },
                 }
             ],
