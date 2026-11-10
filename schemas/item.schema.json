@@ -1,0 +1,22 @@
+{
+  "$schema": "http://json-schema.org/draft-04/schema#",
+  "title": "Patrol item",
+  "description": "巡检源适配器（第1层 Source Adapter）必须产出的统一 item 结构。契约唯一事实源；任何 provider 的 list-items() 产出都必过本校验。",
+  "type": "object",
+  "required": ["id", "title", "priority", "intervalMin"],
+  "additionalProperties": true,
+  "properties": {
+    "id": { "type": "string", "minLength": 1, "description": "源系统行的唯一标识（Bitable record_id / 文档锚点 / 行号）" },
+    "title": { "type": "string", "minLength": 1, "description": "人可读标题" },
+    "repoPath": { "type": "string", "description": "本地仓库路径；无仓可留空" },
+    "description": { "type": "string" },
+    "nextStep": { "type": "string" },
+    "priority": { "type": "string", "enum": ["P0", "P1", "P2"] },
+    "intervalMin": { "type": "integer", "minimum": 0, "description": "该行最短轮询间隔（分钟）；0 = 每轮到期" },
+    "threadId": { "type": ["string", "null"], "description": "续跑用的会话 id；空则每轮新建" },
+    "fake": { "type": "boolean" },
+    "lastRun": { "type": ["string", "null"], "description": "ISO 时间串；空视为到期" },
+    "currentStage": { "type": "string" },
+    "achievement": { "type": "string" }
+  }
+}

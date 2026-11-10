@@ -11,14 +11,31 @@
 #>
 param(
     [string]$TasksFile = (Join-Path $PSScriptRoot 'sample-tasks.json'),
+    [string]$BitableConfigPath = '',  # required when PATROL_ADAPTER=bitable,
     [int]$MaxChildren = 2,
     [int]$RoundTimeoutSec = 120,
     [switch]$DryRun,
-    [switch]$Once
+    [switch]$Once,
+    [string]$JevShadowConfigPath = (Join-Path $PSScriptRoot '..\jev-shadow-hooks\patrol-shadow-config.json'),
+    [string]$JevShadowOutputDir = (Join-Path $PSScriptRoot 'downloads\jev-shadow')
 )
 $ErrorActionPreference = 'Stop'
 try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
-. (Join-Path $PSScriptRoot 'local-json-adapter.ps1')
+. (Join-Path $PSScriptRoot 'patrol-provider.ps1')
+$AdapterName = if($env:PATROL_ADAPTER){ $env:PATROL_ADAPTER } else { 'local-json' }
+# Jev 影子层是可选组件（本地业务扩展），不在本仓分发；缺它则本仓仍可独立运行。
+$JevShadowLib = Join-Path $PSScriptRoot 'JevShadow.ps1'
+$JevShadowAvailable = Test-Path -LiteralPath $JevShadowLib
+if($JevShadowAvailable){ . $JevShadowLib }
+$JevDecisionEndpoint = Join-Path $PSScriptRoot 'Invoke-ItemJevDecision.ps1'
+$JevDecisionAvailable = Test-Path -LiteralPath $JevDecisionEndpoint
+# 装配源适配器：换 provider = 换 adapters/<name>.adapter.json，本文件不改。
+$Provider = Import-PatrolProvider -Provider $AdapterName -Values @{ tasksFile = $TasksFile; configPath = $BitableConfigPath }
+$JevShadowConfig = @{ enabled = $false }
+if($JevShadowConfigPath -and (Test-Path -LiteralPath $JevShadowConfigPath)){ $JevShadowConfig = Get-Content -LiteralPath $JevShadowConfigPath -Raw | ConvertFrom-Json }
+$JevDecisionConfigPath = if($env:JEV_DECISION_CONFIG_PATH){ $env:JEV_DECISION_CONFIG_PATH } else { Join-Path $PSScriptRoot '..\\config\\jev-decision.json' }
+$JevDecisionConfig = @{ decision = @{ enabled = $false; thresholds = @{ low = 0.30; high = 0.70 } } }
+if($JevDecisionConfigPath -and (Test-Path -LiteralPath $JevDecisionConfigPath)){ try { $JevDecisionConfig = Get-Content -LiteralPath $JevDecisionConfigPath -Raw | ConvertFrom-Json } catch {} }
 
 $OutDir = Join-Path $PSScriptRoot 'downloads'
 $MemDir = Join-Path $PSScriptRoot 'memory'
@@ -34,7 +51,7 @@ try {
 try {
     $roundStart = Get-Date
     $stamp = $roundStart.ToString('yyyyMMdd-HHmmss')
-    $items = @(Get-PatrolItems -TasksFile $TasksFile)
+    $items = @(Get-PatrolProviderItems -Provider $Provider)
     $PriorityOrder = @{ 'P0' = 0; 'P1' = 1; 'P2' = 2 }
     $DefaultIntervalMin = 60
     $now = Get-Date
@@ -65,6 +82,8 @@ try {
                 if ($DryRun) {
                     return [pscustomobject]@{
                         id = $Id
+                        status = 'completed'
+                        action = ''
                         currentStage = '完成(dry-run)'
                         achievement = "dry-run: 模拟完成 [$Title] 的一轮有界工作（仓库 $RepoPath；下一步: $NextStep）"
                         threadId = $null
@@ -95,8 +114,34 @@ try {
                             if ($res.threadId) { $target.threadId = $res.threadId }
                             $target.lastRun = (Get-Date).ToString('o')
                         }
+                        if($JevShadowAvailable -and (Get-JevShadowEnabled -Config $JevShadowConfig)){
+                            $shadowCtx = New-PatrolItemJevShadowContext -Item $target
+                            $shadowDecision = Invoke-PatrolItemJevShadow -Context $shadowCtx -Config $JevShadowConfig
+                            $shadowArtifact = New-PatrolJevShadowArtifact -Context $shadowCtx -Decision $shadowDecision -Enabled $true
+                            $shadowMode = if($DryRun){ "dry-run" } else { "real" }
+                            $shadowArtifact = Complete-PatrolJevShadowArtifact -Artifact $shadowArtifact -WorkerResult $res -WorkerMode $shadowMode
+                            Write-PatrolJevShadow -Artifact $shadowArtifact -OutputDir $JevShadowOutputDir | Out-Null
+                        }
                         Write-Host ("[worker] done {0} dur={1}s -> {2}" -f $res.id, $res.durationSec, $res.achievement)
                         $completed++
+                        $decisionItemJson = [ordered]@{ id = $target.id; title = $target.title; repoPath = $target.repoPath; description = $target.description; nextStep = $target.nextStep; priority = $target.priority; intervalMin = $target.intervalMin; threadId = $target.threadId; fake = $target.fake }
+                        $decisionItemPath = Join-Path $env:TEMP ("dec-item-" + [guid]::NewGuid().ToString("N") + ".json")
+                        [System.IO.File]::WriteAllText($decisionItemPath, ($decisionItemJson | ConvertTo-Json -Depth 6), [System.Text.UTF8Encoding]::new($false))
+                        $decisionLogPath = Join-Path $env:TEMP ("dec-item-log-" + [guid]::NewGuid().ToString("N") + ".json")
+                        try {
+                            if(-not $JevDecisionAvailable){ throw 'Jev 决策端点未安装（可选组件，跳过）' }
+                            $null = & pwsh -NoProfile -File $JevDecisionEndpoint -ItemJsonPath $decisionItemPath -JevShadowConfigPath $JevShadowConfigPath -JevDecisionConfigPath $JevDecisionConfigPath -DecisionLogPath $decisionLogPath 2>&1
+                            if (Test-Path -LiteralPath $decisionLogPath) { try { $decisionResult = Get-Content -LiteralPath $decisionLogPath -Raw | ConvertFrom-Json } catch { $decisionResult = $null } } else { $decisionResult = $null }
+                            if ($decisionResult.decision.action -eq 'HUMAN_REVIEW' -and $JevDecisionConfig.decision.enabled) {
+                                Write-Host ("[decision] HUMAN_REVIEW on item " + $decisionResult.item_id + " reason=" + $decisionResult.decision.reason)
+                                $target.currentStage = "HUMAN_REVIEW pending"
+                                continue
+                            }
+                        } catch {
+                            Write-Host ("[decision] endpoint failed, continuing: " + $_.Exception.Message)
+                        } finally {
+                            Remove-Item -LiteralPath $decisionItemPath -ErrorAction SilentlyContinue
+                        }
                     } else {
                         Write-Host ("[worker] FAIL {0} state={1}" -f $j.Name, $j.State); $failed++
                     }
@@ -107,19 +152,19 @@ try {
         }
     }
 
-    # ---- 第4层 sync-back: 落盘 ----
-    Save-PatrolItems -TasksFile $TasksFile -Items $items
+    # ---- 第4层 sync-back: 落盘（经 provider 契约，不认厂商） ----
+    Save-PatrolProviderItems -Provider $Provider -Items $items
 
     # ---- 第6层 output: digest json + md + memory 追加 ----
     $digest = [pscustomobject]@{
-        stamp = $stamp; method = 'local-json'; dryRun = [bool]$DryRun
+        stamp = $stamp; method = $AdapterName; dryRun = [bool]$DryRun
         totalItems = $items.Count; dueCount = $dueArr.Count
         completed = $completed; failed = $failed
         items = @($items | Select-Object id, title, priority, intervalMin, currentStage, lastRun, achievement)
     }
     $jpath = Join-Path $OutDir "patrol-$stamp.json"
     [System.IO.File]::WriteAllText($jpath, ($digest | ConvertTo-Json -Depth 6), [System.Text.UTF8Encoding]::new($false))
-    $md = "## 巡检 (local-json dry-run) $stamp`n- 总计: $($items.Count) | 到期: $($dueArr.Count) | 完成: $completed | 失败: $failed`n"
+    $md = "## 巡检 ($AdapterName$(if($DryRun){' dry-run'})) $stamp`n- 总计: $($items.Count) | 到期: $($dueArr.Count) | 完成: $completed | 失败: $failed`n"
     foreach ($it in $items) { $md += "- [$($it.priority)] $($it.title): $($it.currentStage)`n" }
     $mpath = Join-Path $OutDir "patrol-$stamp.md"
     [System.IO.File]::WriteAllText($mpath, $md, [System.Text.UTF8Encoding]::new($false))

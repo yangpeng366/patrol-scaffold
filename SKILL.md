@@ -18,10 +18,12 @@ machine — no credentials, no network:
 
 ```
 cd <skill-dir>/scripts
+pwsh -File adapter-contract-test.ps1
 pwsh -File patrol-loop.ps1 -TasksFile sample-tasks.json -Once -DryRun
 ```
 
-Expected: `due=3/3`, three workers complete, `sample-tasks.json` gets `lastRun`
+Expected: contract test `pass=1 skip=1 fail=0` (bitable is SKIP without
+credentials, never FAIL); `due=3/3`, three workers complete, `sample-tasks.json` gets `lastRun`
 written back, digest lands in `downloads/patrol-<ts>.json|.md`. Immediate
 re-run shows `due=0/3` (per-row interval filter confirmed).
 
@@ -61,15 +63,31 @@ nssm Windows service) that fires the scheduler each interval.
 
 ## Source-adapter contract (implement once per provider)
 
-Every provider must expose:
+Every provider must expose three canonical functions:
 
-- `list-items()` -> `[{ id, title, repoPath, description, nextStep, priority,
-  intervalMin, threadId, fake }]`
-- `write-back(id, { currentStage, nextStep, achievement, threadId })`
-- `resolve-name(id)` -> human label for the digest
+- `Get-PatrolItems`   -> list-items(): `[{ id, title, repoPath, description,
+  nextStep, priority, intervalMin, threadId, fake }]`
+- `Save-PatrolItems`  -> write-back(id, { currentStage, nextStep, achievement, threadId })
+- `Resolve-ItemName`  -> resolve-name(id) -> human label for the digest
 
-Swap provider by changing ONE config field (`provider`) + ONE adapter module.
-The scheduler / worker / correlator / output / watchdog stay untouched.
+Three layers make the swap real (not just documented):
+
+1. **Contract** — `schemas/item.schema.json` is the single source of truth for the
+   item shape; `scripts/adapter-contract-test.ps1` validates every row any
+   provider produces (offline validator; `Test-Json` hangs offline because it
+   fetches the JSON-Schema meta-schema).
+2. **Assembly** — `adapters/<provider>.adapter.json` declares module path, config,
+   the three functions and their args; `scripts/patrol-provider.ps1` imports,
+   normalizes (`ConvertTo-PatrolItem`) and calls them. Swap provider by dropping
+   in TWO files — the scheduler / worker / correlator / output / watchdog and
+   `patrol-loop.ps1` itself stay untouched.
+3. **Spec** — `references/adapter-spec.md` is a fill-in-the-blank 11-section
+   template for adding a provider (source/trigger, config schema, scope,
+   channel, thread, policy, execution vars, plugin entry/loop, registration,
+   test checklist).
+
+Adding a provider = 2 files + one contract-test PASS. If you find yourself
+editing `patrol-loop.ps1`, the contract has a hole: fix the contract first.
 
 ## Concretizations (reference)
 
@@ -92,9 +110,12 @@ The scheduler / worker / correlator / output / watchdog stay untouched.
 
 ## Files
 
+- `references/adapter-spec.md` - fill-in-the-blank template for adding a data source (11 sections) + test checklist.
 - `references/patrol-blueprint.md` - full architecture, real params, two concretizations (Feishu live / 腾讯文档 swap-in), "apply to other needs" 13-step checklist, anti-patterns.
+- `schemas/item.schema.json` - item contract (single source of truth).
+- `adapters/*.adapter.json` - declarative provider descriptors.
 - `references/codex-global-rules.md` - Codex 全局规约快照（活文件 E:\AI-Portable\codex-home\AGENTS.md 为权威源）：UTF-8 无 BOM、pwsh shell 纪律、改文件优先 helper、飞书通禀、文件失寻恢复。
 - `references/textfile-helper.md` - TextFile.ps1 API（Set/Add/Get-TextFile、Set-TextFilePatch、BOM 扫除、Send-LarkText），巡检写盘与通知的手术刀。活文件 D:\gitAll\auto-deploy\_lib\TextFile.ps1。
 - `references/scheduled-task-recipe.md` - 触发器层：计划任务 round 模型（首选）/ Register-ScheduledTask 模板 / nssm 常驻、看门狗、三条不变量、真实实例与踩坑。
 - `references/local-json-adapter.md` - provider=local-json 适配器文档 + 拷贝即跑 dry-run 指南。
-- `scripts/` - 最小可跑参考实现：`local-json-adapter.ps1`（源适配器）+ `patrol-loop.ps1`（due-list/worker 池/回写/digest，worker 默认 dry-run）+ `sample-tasks.json`（示例任务）。
+- `scripts/` - 最小可跑参考实现：`local-json-adapter.ps1`（源适配器）+ `patrol-provider.ps1`（适配器装配层）+ `adapter-contract-test.ps1`（契约自测）+ `patrol-loop.ps1`（due-list/worker 池/回写/digest，worker 默认 dry-run）+ `sample-tasks.json`（示例任务）。

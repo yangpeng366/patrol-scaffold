@@ -2,3 +2,22 @@
 scripts/downloads/
 scripts/memory/
 *.zip
+# 顶层运行时产物（巡检产出，不入仓）
+downloads/
+reports/
+state/
+
+# 本机业务扩展（Jev 影子层等），不属脚手架，勿入库
+jev-shadow-hooks/
+docs/jev-shadow.md
+scripts/JevShadow*.ps1
+scripts/Invoke-ItemJevDecision.ps1
+scripts/Run-*.ps1
+tests/verify-active-advice.ps1
+tests/verify-bitable-adapter.ps1
+tests/verify-item-jev-decision.ps1
+tests/verify-jev-*.ps1
+tests/verify-shadow-decision-hint.ps1
+tests/fixtures/
+Start-CodexAutoPatrolLoop.ps1
+scripts/JevDecision.ps1

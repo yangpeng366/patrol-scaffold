@@ -1,0 +1,16 @@
+{
+  "provider": "local-json",
+  "title": "本地 JSON 文件",
+  "module": "scripts/local-json-adapter.ps1",
+  "kind": "file",
+  "needsCredentials": false,
+  "needsNetwork": false,
+  "description": "数据源是一个本地 JSON 文件，每行一个任务方向。无凭据、无网络，适合 dry-run 与教学。",
+  "config": {
+    "tasksFile": "scripts/sample-tasks.json"
+  },
+  "listItems": { "function": "Get-PatrolItems", "args": { "TasksFile": "${tasksFile}" } },
+  "writeBack": { "function": "Save-PatrolItems", "args": { "TasksFile": "${tasksFile}" } },
+  "resolveName": { "function": "Resolve-ItemName", "args": {} },
+  "optional": {}
+}

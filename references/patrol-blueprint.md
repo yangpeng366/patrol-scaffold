@@ -94,11 +94,28 @@ Live Feishu values:
 
 ## Provider interface (contract)
 
-| method | returns | notes |
-|---|---|---|
-| `list-items()` | `[{id,title,repoPath,description,nextStep,priority,intervalMin,threadId,fake}]` | the due-filter happens in the scheduler, not here |
-| `write-back(id, fields)` | ok/err | fields = currentStage/nextStep/achievement/threadId |
-| `resolve-name(id)` | string | human label for digest + correlator |
+| method | canonical function | returns | notes |
+|---|---|---|---|
+| `list-items()` | `Get-PatrolItems` | `[{id,title,repoPath,description,nextStep,priority,intervalMin,threadId,fake}]` | the due-filter happens in the scheduler, not here |
+| `write-back(id, fields)` | `Save-PatrolItems` | ok/err | fields = currentStage/nextStep/achievement/threadId |
+| `resolve-name(id)` | `Resolve-ItemName` | string | human label for digest + correlator |
+
+### 契约的三层落法（2026-11-10 起）
+
+1. **契约层（硬约束）** — `schemas/item.schema.json` 是 item 结构的唯一事实源；
+   `scripts/adapter-contract-test.ps1` 拿它逐行校验任何 provider 的产出。
+   离线校验器自带（不用 `Test-Json`：它会去拉 JSON Schema meta-schema，离线会挂）。
+2. **装配层（声明式）** — `adapters/<provider>.adapter.json` 声明模块路径、配置、
+   三个契约函数与参数；`scripts/patrol-provider.ps1` 负责装配、归一、调用。
+   **换 provider = 落两个文件（描述文件 + 模块），`patrol-loop.ps1` 不改一行。**
+   形状不一的 item 由 `ConvertTo-PatrolItem` 在边界统一归一
+   （坑：`ConvertFrom-Json` 会把 ISO 时间串变成 `[DateTime]`）。
+3. **规格层（可抄）** — `references/adapter-spec.md` 是填表式的「加一个数据源」模板，
+   11 节：源与触发 / 配置 schema / 触发器构造 / scope / Channel / Thread / Policy /
+   执行变量 / 插件入口与循环 / 插件注册 / 测试清单。
+
+旧名 `Read-PatrolItems` 保留为兼容包装（`scripts/BitAbleAdapter.ps1` 末尾），
+新描述文件一律用 `Get-PatrolItems`。
 
 ## Concretization A - Feishu (live, today)
 
@@ -140,7 +157,8 @@ resume/reset, correlator, digest, watchdog) runs unchanged.
 
 1. Confirm the need is recurring (not one-off) and maps to "row -> bounded work".
 2. Pick a source provider (bitable / tencent-docs / sheets / local-json). If no
-   row source exists, create a small sheet first.
+   row source exists, create a small sheet first. 照 `references/adapter-spec.md` 填表，
+   落 `adapters/<provider>.adapter.json` + 一个模块脚本，再跑契约自测。
 3. Define the item fields -> title/repoPath/nextStep/priority/intervalMin/threadId.
 4. Copy the scheduler loop; swap ONLY the source-read function (keep due-list,
    worker pool, mutex, round timeout).

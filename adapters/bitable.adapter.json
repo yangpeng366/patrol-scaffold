@@ -1,0 +1,20 @@
+{
+  "provider": "bitable",
+  "title": "飞书多维表格",
+  "module": "scripts/BitAbleAdapter.ps1",
+  "kind": "cli",
+  "needsCredentials": true,
+  "needsNetwork": true,
+  "description": "用 lark-cli base --as user 读多维表格行并归一为 item；写回由 Sync-BitableRoundResult 承担（需 config.sync_back=true 且显式 -SyncBack）。",
+  "config": {
+    "configPath": "",
+    "identity": "user",
+    "helpersPath": ""
+  },
+  "listItems": { "function": "Get-PatrolItems", "args": { "BitableConfigPath": "${configPath}", "Identity": "${identity}" } },
+  "writeBack": { "function": "Save-PatrolItems", "args": { "TasksFile": "${tasksFile}" } },
+  "resolveName": { "function": "Resolve-ItemName", "args": {} },
+  "optional": {
+    "syncBack": { "function": "Sync-BitableRoundResult", "args": { "BitableConfigPath": "${configPath}", "Identity": "${identity}" } }
+  }
+}

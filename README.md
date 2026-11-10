@@ -7,6 +7,9 @@
 下面的调度器、worker、关联器、输出、看门狗全部可原样复用。换数据源 = 换一个适配器
 + 改一个 `provider` 配置字段，下游不动。
 
+**适应性的三层落法**（这版起）：契约有 schema 与自测硬约束，装配靠声明式描述文件，
+扩展有填表式规格模板。新增一个 provider = 两个文件 + 一次自测 PASS，**主循环不改**。
+
 ## 解决什么问题
 
 任何「周期性读一个任务表 → 给每行派发一段有界 agent 工作 → 回写结果 → 摘要入库 →
@@ -35,10 +38,13 @@
 
 ```powershell
 cd scripts
+pwsh -File adapter-contract-test.ps1      # 契约自测：适配器装配 + 每行过 schema
 pwsh -File patrol-loop.ps1 -TasksFile sample-tasks.json -Once -DryRun
 ```
 
-预期：`due=3/3`，三个 worker 完成，`sample-tasks.json` 的 `lastRun` 被回写，digest 落在 `downloads/patrol-<ts>.json|.md`。立即重跑：`due=0/3`（证 per-row interval 过滤生效）。
+预期：契约自测 `pass=1 skip=1 fail=0`（bitable 无凭据时为 SKIP 而非 FAIL）；
+`due=3/3`，三个 worker 完成，`sample-tasks.json` 的 `lastRun` 被回写，digest 落在
+`downloads/patrol-<ts>.json|.md`。立即重跑：`due=0/3`（证 per-row interval 过滤生效）。
 
 跑不通先修 pwsh / 路径——链路跑不通之前，架构读了也白读。跑通后再读 `references/patrol-blueprint.md` 理解架构、`references/local-json-adapter.md` 换真实数据源。
 
@@ -57,7 +63,12 @@ pwsh -File patrol-loop.ps1 -TasksFile sample-tasks.json -Once -DryRun
 ## 文件
 
 - `SKILL.md` — 入口（七层架构 + 适配器契约 + 安全边界）
+- `references/adapter-spec.md` — **加一个数据源的填表式模板（11 节）**
 - `references/patrol-blueprint.md` — 全架构 + 真实参数 + 两种落地 + 13 步迁移清单 + 踩坑
+- `schemas/item.schema.json` — item 契约唯一事实源
+- `adapters/*.adapter.json` — provider 声明式描述（模块 / 配置 / 契约函数）
+- `scripts/patrol-provider.ps1` — 适配器装配层（导入、归一、调用）
+- `scripts/adapter-contract-test.ps1` — 适配器契约自测（离线校验器）
 - `references/codex-global-rules.md` — Codex 全局规约快照（活文件为准）
 - `references/textfile-helper.md` — `TextFile.ps1` 写盘 / 通知 helper API
 - `references/scheduled-task-recipe.md` — 触发器层注册 recipe
