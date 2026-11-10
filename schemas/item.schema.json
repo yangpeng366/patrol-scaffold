@@ -12,7 +12,7 @@
     "description": { "type": "string" },
     "nextStep": { "type": "string" },
     "priority": { "type": "string", "enum": ["P0", "P1", "P2"] },
-    "intervalMin": { "type": "integer", "minimum": 0, "description": "该行最短轮询间隔（分钟）；0 = 每轮到期" },
+    "intervalMin": { "type": "integer", "minimum": 0, "description": "该行最短轮询间隔（分钟）；0 = 停跑（不进入调度）" },
     "threadId": { "type": ["string", "null"], "description": "续跑用的会话 id；空则每轮新建" },
     "fake": { "type": "boolean" },
     "lastRun": { "type": ["string", "null"], "description": "ISO 时间串；空视为到期" },

@@ -25,6 +25,7 @@ $ErrorActionPreference = 'Stop'
 try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
 . (Join-Path $PSScriptRoot 'patrol-provider.ps1')
 . (Join-Path $PSScriptRoot 'patrol-state.ps1')
+. (Join-Path $PSScriptRoot 'patrol-schedule.ps1')
 $AdapterName = if($env:PATROL_ADAPTER){ $env:PATROL_ADAPTER } else { 'local-json' }
 # Jev 影子层是可选组件（本地业务扩展），不在本仓分发；缺它则本仓仍可独立运行。
 $JevShadowLib = Join-Path $PSScriptRoot 'JevShadow.ps1'
@@ -58,20 +59,15 @@ try {
     $state = Read-PatrolState -Path $StateFile
     $items = @(Merge-PatrolState -Items $items -State $state)
     $PriorityOrder = @{ 'P0' = 0; 'P1' = 1; 'P2' = 2 }
-    $DefaultIntervalMin = 60
     $now = Get-Date
 
     # ---- due-list: per-row interval + 优先级 ----
-    $due = New-Object System.Collections.Generic.List[object]
-    foreach ($it in $items) {
-        $interval = [int]$it.intervalMin
-        if ($interval -le 0) { $interval = $DefaultIntervalMin }   # 0/空 -> 回退 60（同在用系统）
-        $last = [datetime]::MinValue
-        if ($it.lastRun) { try { $last = [datetime]$it.lastRun } catch { $last = [datetime]::MinValue } }
-        if (($now - $last).TotalMinutes -ge $interval) { $due.Add($it) }
-    }
-    $dueArr = $due | Sort-Object { $p = $_.priority; if ($PriorityOrder.ContainsKey($p)) { $PriorityOrder[$p] } else { 99 } }
-    Write-Host "[round] due=$($dueArr.Count)/$($items.Count) maxChildren=$MaxChildren dryRun=$DryRun"
+    # 生产口径：intervalMin > 0 且 lastRun 空/超间隔才到期；0 / 空 / 缺列 / 负数 = 停跑（disabled）。
+    # 这里**不再**把 <=0 回退成 60——那会让已停项目每 60 分钟被复活一次（见 patrol-schedule.ps1）。
+    $selection = Get-PatrolDueSelection -Items $items -Now $now
+    $dueArr = @($selection.Due | Sort-Object { $p = $_.priority; if ($PriorityOrder.ContainsKey($p)) { $PriorityOrder[$p] } else { 99 } })
+    $disabledArr = @($selection.Disabled)
+    Write-Host "[round] due=$($dueArr.Count)/$($items.Count) disabled=$($disabledArr.Count) maxChildren=$MaxChildren dryRun=$DryRun"
 
     # ---- worker 池（第3层）----
     $jobs = New-Object System.Collections.Generic.List[object]

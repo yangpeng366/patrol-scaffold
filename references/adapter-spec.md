@@ -99,7 +99,7 @@
 |---|---|---|
 | `title` / `repoPath` / `description` / `nextStep` | 行字段 | 拼 worker prompt |
 | `priority` | 行字段 | 排序（P0 先） |
-| `intervalMin` | 行字段 | 到期判定（0 = 每轮到期） |
+| `intervalMin` | 行字段 | 到期判定（`> 0` 才参与调度；`0` / 空 / 缺列 = 停跑） |
 | `threadId` | 行字段 | 续跑 |
 | `fake` | 行字段 | 演练开关 |
 

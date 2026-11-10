@@ -226,7 +226,7 @@ pwsh -NoProfile -File tests/verify-adapter-spec.ps1
 | `id` | 必须有，缺则抛 `ConvertTo-PatrolItem: item 缺 id` |
 | `title` | 空则回退 `id` |
 | `priority` | 去空格转大写；不在 `P0/P1/P2` 内一律降为 `P2` |
-| `intervalMin` | 转 `int`，转不动或负数 → `0`（0 = 每轮到期，调度器按 60 分钟回退） |
+| `intervalMin` | 转 `int`，转不动或负数 → `0`（`0` = 停跑：调度器不进 due，也不回退默认间隔） |
 | `lastRun` | `DateTime`/`DateTimeOffset` → ISO 8601（`'o'`）；空 → `$null` |
 | `threadId` / `fake` | 空 → `$null` / `false` |
 | `repoPath`、`description`、`nextStep`、`currentStage`、`achievement` | 空 → `''` |
@@ -240,10 +240,16 @@ pwsh -NoProfile -File tests/verify-adapter-spec.ps1
 和兄弟仓 `src/source/bitable.ts`（真的 import 原码，不手抄），逐字段比、类型也要一样，任一不等 exit 1。
 改归一规则（尤其 `priority` / `intervalMin` / `threadId` / `fake`）先跑它。
 
-> `intervalMin` 的分层：**解析层如实翻译**（0 / 缺列 / 非法 → `0`），**调度层才做回退**
-> （`patrol-loop.ps1` 与 dsh `mapping.ts::itemIsDue` 都是 `<=0 → 60`）。
-> 所以适配器里写 `if ($interval -le 0) { $interval = 60 }` 是**错的**——它会把「0 = 每轮到期」的行
-> 在解析阶段就改成 60 分钟一轮，两仓从此不同形，且静默降频。
+> `intervalMin` 的分层：**解析层如实翻译**（0 / 缺列 / 非法 → `0`），**调度层才决定要不要派**
+> （`scripts/patrol-schedule.ps1::Get-PatrolDueSelection`：`> 0` 才参与调度，`0` / 空 / 负数 = 停跑）。
+> 所以适配器里写 `if ($interval -le 0) { $interval = 60 }` 是**错的**——它会把「停跑」的行
+> 在解析阶段悄悄改成 60 分钟一轮，停跑口径当场失效。
+>
+> 与 dsh-patrol 的差异是**刻意保留**的：兄弟仓 `src/mapping.ts::itemIsDue` 仍是
+> `item.intervalMin > 0 ? item.intervalMin : 60`（把 `0` 当「最短间隔」）。本仓按表数据约定
+> 优先（`0` 值行在表里普遍写「停跑 / 停用 / 只读留档」）。**若要把本仓的表接进 dsh 的 auto 模式，
+> 必须先做映射**（停跑行换一个标记，或改 `itemIsDue`），否则已停行会被每 60 分钟唤醒一次。
+> 本仓不改兄弟仓，`tests/verify-disabled-scheduling.ps1` 只钉本仓口径。
 
 `schemas/item.schema.json` 的 `required` 是 `id/title/priority/intervalMin`，但归一之后这四个一定齐，
 所以契约自测真正会红的是 **`id` 为空**、**`priority` 非法**、**`intervalMin` 非整数**这几类。

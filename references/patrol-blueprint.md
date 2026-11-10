@@ -48,7 +48,8 @@ Live Feishu values:
   - codex_thread_id (fldl2M1qYo) -> threadId
 
 ### 2. Scheduler
-- due = `now - lastRun >= intervalMin`; missing/0 interval -> DefaultIntervalMin (60)
+- due = `now - lastRun >= intervalMin`, and only for `intervalMin > 0`;
+  `0` / empty / missing / negative interval = **disabled** (parked, never scheduled — no 60-minute fallback)
 - priority sort via PriorityOrder {P0=0, P1=1, P2=2}
 - worker pool: `MaxPatrolChildren = 3` concurrent active workers (NOT a per-round cap)
 - round hard timeout `RoundTimeoutSec = 1500` -> yields to next nssm/schtasks trigger

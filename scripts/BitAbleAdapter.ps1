@@ -52,8 +52,8 @@ function Convert-BitableRowToItem {
     #
     # 语义要点（都以「调度层负责兜底」为前提，解析层只如实翻译行数据）：
     #   priority    P0/P1 保留，其余（P3/空/大小写杂乱）一律 P2（schema enum 只有三个值）
-    #   intervalMin 0 / 缺列 / 非法 一律 0；0 表示「最短间隔为 0」，由调度器决定怎么回退
-    #               —— 这里绝不能把 0 改写成 60，否则「0 = 每轮到期」的行会被悄悄改成 60 分钟一轮
+    #   intervalMin 0 / 缺列 / 非法 一律 0；0 = 停跑（调度层不进入 due，也不回退 60）
+    #               —— 这里绝不能把 0 改写成 60，否则已停行会被每 60 分钟唤醒一次
     #   threadId    空串与缺列都是 null（不是 ''），下游判断「有没有会话可续跑」只看 truthy
     #   fake        只认 Bitable 复选框的真布尔 true；字符串 "true"/"1"/"是" 一律 false
     #   title/id/nextStep 去首尾空白；description/repoPath 等原样保留

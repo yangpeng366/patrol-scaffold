@@ -21,7 +21,7 @@
 ## 七层架构（只有第 1 层认识厂商）
 
 1. **Source Adapter** — 读行数据为统一 item 结构（可换 provider）
-2. **Scheduler** — 按每行 interval + 优先级算 due-list；worker 池并发上限；round 硬超时；全局 mutex
+2. **Scheduler** — 按每行 interval + 优先级算 due-list（`intervalMin` 为 `0`/空/缺列 = 停跑，不进 due）；worker 池并发上限；round 硬超时；全局 mutex
 3. **Worker** — 每项一段有界 `codex exec`；按 threadId 续跑否则新建；连续失败 N 次重置
 4. **Sync-back** — 回写 CurrentStage / NextStep / Achievement + threadId 到源行
 5. **Correlator** — 映射发现 → 本地仓 git 状态
@@ -51,11 +51,35 @@ pwsh -File patrol-loop.ps1 -TasksFile sample-tasks.json -Once -DryRun
 ```
 
 预期：契约自测 `pass=3 skip=2 fail=0`（`command` / `csv-file` / `local-json` 实跑，
-`bitable` / `tencent-docs` 无凭据时为 SKIP 而非 FAIL）；`due=3/3`，三个 worker 完成，
+`bitable` / `tencent-docs` 无凭据时为 SKIP 而非 FAIL）；`due=1/3 disabled=2`（`sample-tasks.json`
+里 demo-A / demo-C 的 `intervalMin=0` 是**停跑行**，只有 demo-B 到期），一个 worker 完成，
 运行态落 `state/patrol-state.json`（**源文件只读，不被回写**），digest 落在
-`downloads/patrol-<ts>.json|.md`。立即重跑：`due=0/3`（证 per-row interval 过滤生效）。
+`downloads/patrol-<ts>.json|.md`。立即重跑：`due=0/3 disabled=2`（证 per-row interval 过滤生效）。
 
-> 版本更新后先跑这条链路再谈别的：`due=3/3` 是「装好了」的唯一硬信号。
+> 版本更新后先跑这条链路再谈别的：`due=1/3 disabled=2` 是「装好了」的硬信号——
+> `due` 数对得上、`disabled` 数也对得上，才说明调度层读懂了这一版的分档语义。
+
+### 巡检间隔：`0` / 空 = 停跑
+
+`intervalMin`（源列 `巡检间隔(分钟)`）只有**正数**才参与调度：
+
+| 取值 | 调度行为 |
+|---|---|
+| `> 0`，`lastRun` 为空 / 解析不出 / 已超间隔 | **due**：派一个 worker |
+| `> 0`，`lastRun` 未超间隔 | 未到期：不派发，也不是停跑（下轮再看） |
+| `0`、空串、缺列、负数 | **停跑（disabled）**：只计数，永不进入 due |
+
+口径来自方向表的实际写法：`0` 值行普遍注「停跑 / 停用 / 只读留档」（fastjson2 不修、networkx 转人工 PR、
+多条多媒体停跑项）。旧实现把 `<=0` 回退成 60 分钟，等于让已停项目每 60 分钟被唤醒一次；
+现实现由 `scripts/patrol-schedule.ps1::Get-PatrolDueSelection` 统一判定，**不做任何回退**，
+每轮输出 `[round] due=X/Y disabled=Z ...` 让停跑行可见。
+
+> 注意 `lastRun` 的「空」不等于停跑：`lastRun` 空 = 没跑过，仍然到期。停跑只看 `intervalMin`。
+>
+> 与兄弟仓 `dsh-patrol` 的差异是**刻意保留**的：它的 `src/mapping.ts::itemIsDue` 仍是
+> `intervalMin <= 0 -> 60`（把 `0` 当「最短间隔」）。本仓按表数据约定优先；若要把本仓的表接进
+> dsh 的 auto 模式，**必须先做映射**（停跑行换标记，或改 `itemIsDue`），否则已停行会被每 60 分钟
+> 唤醒一次。本仓不改兄弟仓，门禁 `tests/verify-disabled-scheduling.ps1` 只钉本仓口径。
 
 ## Provider 支持边界（0.2.0 实测）
 
@@ -91,6 +115,18 @@ pwsh -NoProfile -File tests/verify-item-parity-e2e.ps1        # 动态：同一�
 换成注入的 `exec` 返回 fixture 信封——列映射与归一都是 dsh-patrol 原码。7 条 fixture 覆盖：正常行、
 缺 `巡检间隔(分钟)`、间隔 `0`、优先级 `P3`、假数据 true / 字符串 `"true"`、空白+大小写+小数间隔+空串 threadId。
 本机没 clone 兄弟仓、或没有 node ≥ 22.6 时打印 `SKIP`（exit 0）并写明缺什么；**SKIP 不是 PASS**。
+
+### 调度语义闸门：`0` / 空 = 停跑
+
+```powershell
+pwsh -NoProfile -File tests/verify-disabled-scheduling.ps1   # 停跑语义：13 条断言 + 3 个变异自证
+```
+
+它直接打生产路径上的同一个函数（`scripts/patrol-schedule.ps1::Get-PatrolDueSelection`，`patrol-loop.ps1`
+也 dot-source 它）：`0` / 缺列 / 负数 / `null` / 空串必须进 `disabled` 且不进 `due`；`intervalMin=90` 刚跑过
+不进（但也不是 disabled）、超期才进；`intervalMin=1` 且 `lastRun` 空必须进。脚本在 %TEMP% 造 3 个变异副本
+自证闸门不会说谎——去掉 `<=0` 跳过、恢复旧口径 `<=0 -> 60`、把 `lastRun` 空改成不派发，三种改坏都必须判红
+并点名到具体断言。
 
 跑不通先修 pwsh / 路径——链路跑不通之前，架构读了也白读。跑通后再读 `references/patrol-blueprint.md` 理解架构、`references/local-json-adapter.md` 换真实数据源。
 

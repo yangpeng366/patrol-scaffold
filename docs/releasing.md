@@ -77,9 +77,10 @@ pwsh -NoProfile -File scripts/patrol-loop.ps1 -TasksFile (Join-Path $t 'sample-t
   -StateFile (Join-Path $t 'state.json') -Once -DryRun
 ```
 
-期望：首轮 `[round] due=3/3 maxChildren=2 dryRun=True` + 三条 `[worker] done`，次轮 `due=0/3`；
+期望：首轮 `[round] due=1/3 disabled=2 maxChildren=2 dryRun=True` + 一条 `[worker] done`，次轮 `due=0/3 disabled=2`；
 digest 落在 `scripts/downloads/patrol-<ts>.json|.md`（目录已忽略）。
-`due=3/3` 只在用 HEAD 版任务文件（3 行）时成立；工作区副本若被加过行，行数会不同，不代表失败。
+`due=1/3 disabled=2` 只在用 HEAD 版任务文件（3 行，其中 demo-A / demo-C 是 `intervalMin=0` 的停跑行）时成立；
+工作区副本若被加过行，行数会不同，不代表失败。
 
 ---
 

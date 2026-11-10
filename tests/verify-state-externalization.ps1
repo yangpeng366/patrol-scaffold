@@ -39,7 +39,7 @@ function Assert-Check {
 try {
     # Run a byte-for-byte copy of the loop tree in TEMP so digest/memory outputs
     # never land in the repository.
-    foreach ($name in @('patrol-loop.ps1', 'patrol-provider.ps1', 'patrol-state.ps1', 'local-json-adapter.ps1')) {
+    foreach ($name in @('patrol-loop.ps1', 'patrol-provider.ps1', 'patrol-state.ps1', 'patrol-schedule.ps1', 'local-json-adapter.ps1')) {
         Copy-Item -LiteralPath (Join-Path $root "scripts\$name") -Destination (Join-Path $scriptsTmp $name) -Force
     }
     foreach ($name in @('JevShadow.ps1', 'Invoke-ItemJevDecision.ps1', 'JevDecision.ps1')) {
@@ -56,12 +56,15 @@ try {
     # Older versions wrote run state back into sample-tasks.json. Normalize the
     # TEMP copy to the 3-row baseline (lastRun empty) so this test measures the
     # state contract, not whatever dirt the working tree currently carries.
+    # intervalMin=0 现在是「停跑」（见 tests/verify-disabled-scheduling.ps1），停跑行不派发也就
+    # 不会被回写 lastRun，本测试要验的是「source 只读 + 运行态外置」，所以把基线行的间隔改成正值。
     $baseline = @(@(Get-Content -LiteralPath $tasksCopy -Raw | ConvertFrom-Json) | Select-Object -First 3)
     if ($baseline.Count -ne 3) { throw "sample-tasks.json needs at least 3 rows, got $($baseline.Count)" }
     foreach ($item in $baseline) {
         foreach ($field in @('lastRun', 'currentStage', 'achievement', 'threadId')) {
             $item.$field = $null
         }
+        $item.intervalMin = 60
     }
     [System.IO.File]::WriteAllText($tasksCopy, ($baseline | ConvertTo-Json -Depth 8 -AsArray), $encoding)
 
@@ -73,11 +76,14 @@ try {
     $code2 = $LASTEXITCODE
 
     $afterHash = (Get-FileHash -LiteralPath $tasksCopy -Algorithm SHA256).Hash
-    $due1 = if ($out1 -match 'due=(\d+/\d+)') { $Matches[1] } else { 'missing' }
-    $due2 = if ($out2 -match 'due=(\d+/\d+)') { $Matches[1] } else { 'missing' }
+    $due1 = if ($out1 -match 'due=(\d+/\d+) disabled=(\d+)') { $Matches[1] } else { 'missing' }
+    $disabled1 = if ($out1 -match 'due=(\d+/\d+) disabled=(\d+)') { $Matches[2] } else { 'missing' }
+    $due2 = if ($out2 -match 'due=(\d+/\d+) disabled=(\d+)') { $Matches[1] } else { 'missing' }
+    $disabled2 = if ($out2 -match 'due=(\d+/\d+) disabled=(\d+)') { $Matches[2] } else { 'missing' }
 
     Assert-Check 'a) source copy SHA256 unchanged' ($beforeHash -eq $afterHash) ("before=$beforeHash after=$afterHash exit1=$code1 exit2=$code2")
-    Assert-Check 'b) first run due=3/3, second run due=0/3' (($code1 -eq 0) -and ($code2 -eq 0) -and ($due1 -eq '3/3') -and ($due2 -eq '0/3')) ("run1=$due1 run2=$due2")
+    Assert-Check 'b) first run due=3/3, second run due=0/3' (($code1 -eq 0) -and ($code2 -eq 0) -and ($due1 -eq '3/3') -and ($due2 -eq '0/3')) ("run1=$due1 run2=$due2 exit1=$code1 exit2=$code2")
+    Assert-Check 'd) 基线行间隔为正值，disabled=0（没有行因停跑被跳过）' (($disabled1 -eq '0') -and ($disabled2 -eq '0')) ("disabled1=$disabled1 disabled2=$disabled2")
 
     $stateExists = Test-Path -LiteralPath $stateFile
     $records = @()

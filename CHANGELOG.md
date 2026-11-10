@@ -10,6 +10,9 @@
 主题：**把「两仓解析同一行得到同一份 item」也变成会红的闸门**。上一版只比两份 `item.schema.json` 的
 约束面（静态同源），这次补的是动态对拍（同一份行数据喂两边，逐字段相等）。
 
+本轮追加主题：**`巡检间隔 = 0` 从「每轮到期」改为「停跑」**——表数据早就这么用（0 值行普遍写
+「停跑 / 停用 / 只读留档」），但调度层仍把 `<=0` 回退成 60，等于每 60 分钟把已停项目唤醒一次。
+
 ### Added
 
 - **`tests/verify-item-parity-e2e.ps1`**：跨仓端到端对拍。7 条 fixture 行（正常 / 缺 `巡检间隔(分钟)` /
@@ -20,9 +23,27 @@
 - **`tests/normalize-item-dsh.mjs`**：对拍右侧的读取器。用 Node `--experimental-strip-types` 直接 import
   兄弟仓 TypeScript 原码，只把 `lark-cli` 子进程换成注入的 `exec` 返回 fixture 信封（不联网、不碰真表、
   不装依赖、不手抄 normalize 逻辑）。
+- **`tests/verify-disabled-scheduling.ps1`**：停跑语义闸门。9 条 fixture（`intervalMin` = 0 / 缺列 / -15 /
+  `null` / 空串 / 90 且刚跑过 / 90 且超期 / 1 且 `lastRun` 空 / 90 且 `lastRun=null`）+ 13 条断言
+  （含 due / disabled 集合相等与「due+disabled+pending = 行数」分区完整），直接 dot-source 生产函数
+  `scripts/patrol-schedule.ps1::Get-PatrolDueSelection`（不是副本）。自带比较器自证：在 %TEMP% 造 3 个
+  变异副本（去掉 `<=0` 跳过 / 恢复旧口径 `<=0 -> 60` / `lastRun` 空时不派发），改坏必须判红并点名到断言。
 
 ### Changed
 
+- **调度层改为「`intervalMin` = 0 / 空 / 缺列 / 负数 = 停跑」**（生产口径，表数据约定优先）。
+  `scripts/patrol-loop.ps1` 原先把 `<=0` 回退成 60 分钟，已停行会被每轮复活；现在 due-list 交给新文件
+  `scripts/patrol-schedule.ps1::Get-PatrolDueSelection`：只有 `intervalMin > 0` 且 `lastRun` 为空 /
+  解析不出 / 已超间隔才进 due，停跑行只计数不派发。每轮输出改为
+  `[round] due=X/Y disabled=Z maxChildren=... dryRun=...`。worker 池、并发上限、回写与 digest 未动。
+- **与 dsh-patrol `src/mapping.ts::itemIsDue`（`<=0 -> 60`）的差异是刻意保留的**：本仓按表数据约定
+  优先，兄弟仓一行未改。若要把本仓的表接进 dsh 的 auto 模式，**必须先做映射**（停跑行换标记，或改
+  `itemIsDue`），否则已停行会被每 60 分钟唤醒一次。
+- `schemas/item.schema.json` 的 `intervalMin` 描述改为「该行最短轮询间隔（分钟）；0 = 停跑（不进入调度）」。
+  只改注释面（`type` / `minimum` 未动），跨仓 `verify-item-contract-parity.ps1` 对 dsh-patrol 仍 PASS，
+  该差异以 `NOTE` 打印，不误红。
+- `tests/verify-state-externalization.ps1`：3 行基线的 `intervalMin` 置为 60。停跑行不派发也就不会回写
+  `lastRun`，而该测试验的是「源只读 + 运行态外置」，沿用 0 值会把两件事混在一起；另加一条 `disabled=0` 断言。
 - **`scripts/BitAbleAdapter.ps1::Convert-BitableRowToItem` 的归一规则与 dsh-patrol `normalizeItem` 对齐**：
   - `priority`：去首尾空白 + 大写，只有 `P0/P1` 保留，其余（含 `P3`、空）降 `P2`（原实现原样透传，
     `P3` 会破 schema enum）；
@@ -40,15 +61,15 @@
 - `tests/verify-bitable-adapter.ps1` 同步上述口径（`pass=16` → `pass=33`），并补新字段/类型断言。
 - `schemas/item.schema.json` **不变**：五个新字段在 `additionalProperties: true` 下合法，且 dsh-patrol 那份
   schema 同样未列它们；只在本仓加会让 `verify-item-contract-parity.ps1` 报 ONLY-LEFT。要进 schema 得两仓同步一次。
-- README / `references/adding-a-provider.md` / `docs/releasing.md` / CI 补上这条闸门与
-  「解析层保留 0、调度层才回退」的分层说明。
+- README（新增「巡检间隔：`0` / 空 = 停跑」小节 + 跨仓闸门清单）/ `references/adding-a-provider.md` /
+  `references/adapter-spec.md` / `references/patrol-blueprint.md` / `references/csv-file-adapter.md` /
+  `docs/releasing.md` / `SKILL.md` / CI 同步新口径与实测数字（3 行样本：`due=1/3 disabled=2`）。
 
 ### Fixed
 
 - **`巡检间隔(分钟) = 0` 不再被解析层改写成 60**。原实现 `if ($interval -le 0) { $interval = 60 }` 会让
-  「0 = 每轮到期」的行在解析阶段就变成 60 分钟一轮（静默降频），且与 dsh 的 `normalizeItem`（保留 0）不同形。
-  现在解析层如实保留 `0`，回退只发生在调度层：`patrol-loop.ps1` 的 `<=0 -> 60` 与 dsh
-  `mapping.ts::itemIsDue` 的 `<=0 -> 60` 同一口径，有效行为不变、语义不再丢。
+  行在解析阶段就变成 60 分钟一轮（静默降频），且与 dsh 的 `normalizeItem`（保留 0）不同形。
+  现在解析层如实保留 `0`，调度层也不再回退（`0` / 空 / 负数 = 停跑），全链路一个口径。
 
 ## [0.2.0] - 2026-11-11
 

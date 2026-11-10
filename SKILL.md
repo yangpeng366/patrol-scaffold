@@ -27,10 +27,11 @@ pwsh -File scripts/patrol-loop.ps1 -TasksFile scripts/sample-tasks.json -Once -D
 
 Expected: contract test `pass=3 skip=2 fail=0` (`command` / `csv-file` / `local-json` run for
 real; `bitable` / `tencent-docs` are SKIP without credentials, never FAIL); state test
-`state externalization: PASS`; `due=3/3`, three workers complete, runtime state lands in
-`state/patrol-state.json` while `sample-tasks.json` stays read-only, digest lands in
-`downloads/patrol-<ts>.json|.md`. Immediate re-run shows `due=0/3` because `lastRun` is
-merged from the state file.
+`state externalization: PASS`; `due=1/3 disabled=2` (demo-A / demo-C are `intervalMin=0`
+rows, i.e. parked: `0` = disabled, not "every round"), one worker completes, runtime state
+lands in `state/patrol-state.json` while `sample-tasks.json` stays read-only, digest lands
+in `downloads/patrol-<ts>.json|.md`. Immediate re-run shows `due=0/3 disabled=2` because
+`lastRun` is merged from the state file.
 
 If this fails, fix your pwsh / dot-source path FIRST — the scaffold is
 meaningless until the pipeline runs end-to-end. Then read

@@ -206,8 +206,9 @@ function Set-PatrolCsvRowFields { param([string]$CsvPath, [string]$TasksFile, [s
 - [x] `pwsh -NoProfile -File scripts/adapter-contract-test.ps1` → `pass=2 skip=2 fail=0`（bitable / tencent-docs 无凭据为 SKIP 而非 FAIL）
 - [x] `pwsh -NoProfile -File tests/verify-csv-file-adapter.ps1` → `pass=43 fail=0`（行数/映射、引号逗号与换行、中文表头 columnMap、缺列非零退出、写回字节保真/无 BOM/幂等/异常）
 - [x] `pwsh -NoProfile -File tests/verify-no-secrets.ps1` → PASS（本 provider 不读任何密钥）
-- [x] `PATROL_ADAPTER=csv-file; pwsh -File scripts/patrol-loop.ps1 -TasksFile <csv> -StateFile <temp> -Once -DryRun` → `due=3/3`，三个 worker 完成，digest `method=csv-file`
-- [x] 立刻重跑 → `due=0/3`（per-row interval + state 合并生效）
+- [x] `PATROL_ADAPTER=csv-file; pwsh -File scripts/patrol-loop.ps1 -TasksFile <csv> -StateFile <temp> -Once -DryRun` → `due=1/3 disabled=2`，一个 worker 完成，digest `method=csv-file`
+      （`sample-tasks.csv` 里 csv-A / csv-C 的 `interval` 是 0，按「0 = 停跑」只计数不派发）
+- [x] 立刻重跑 → `due=0/3 disabled=2`（per-row interval + state 合并生效）
 
 **必做（人工）**
 
