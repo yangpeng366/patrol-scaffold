@@ -17,15 +17,17 @@ Before reading further or swapping anything, verify the scaffold runs on your
 machine — no credentials, no network:
 
 ```
-cd <skill-dir>/scripts
-pwsh -File adapter-contract-test.ps1
-pwsh -File patrol-loop.ps1 -TasksFile sample-tasks.json -Once -DryRun
+cd <skill-dir>
+pwsh -File scripts/adapter-contract-test.ps1
+pwsh -File tests/verify-state-externalization.ps1
+pwsh -File scripts/patrol-loop.ps1 -TasksFile scripts/sample-tasks.json -Once -DryRun
 ```
 
 Expected: contract test `pass=1 skip=1 fail=0` (bitable is SKIP without
-credentials, never FAIL); `due=3/3`, three workers complete, `sample-tasks.json` gets `lastRun`
-written back, digest lands in `downloads/patrol-<ts>.json|.md`. Immediate
-re-run shows `due=0/3` (per-row interval filter confirmed).
+credentials, never FAIL); state test `state externalization: PASS`; `due=3/3`,
+three workers complete, runtime state lands in `state/patrol-state.json` while
+`sample-tasks.json` stays read-only, digest lands in `downloads/patrol-<ts>.json|.md`.
+Immediate re-run shows `due=0/3` because `lastRun` is merged from the state file.
 
 If this fails, fix your pwsh / dot-source path FIRST — the scaffold is
 meaningless until the pipeline runs end-to-end. Then read

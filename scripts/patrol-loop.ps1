@@ -6,6 +6,7 @@
   拷贝即用的参考实现，演示蓝皮书七层里的第 2/3/6 层：
   due-list（per-row interval+优先级）-> worker 池（Start-Job 并发上限）-> 回写 -> digest。
   worker 默认 dry-run（不依赖 codex/凭据）；真实模式钩子见 worker ScriptBlock 注释。
+  运行态写 state/patrol-state.json，源只读。
 .NOTES
   实测: pwsh -File patrol-loop.ps1 -TasksFile sample-tasks.json -Once -DryRun
 #>
@@ -17,11 +18,13 @@ param(
     [switch]$DryRun,
     [switch]$Once,
     [string]$JevShadowConfigPath = (Join-Path $PSScriptRoot '..\jev-shadow-hooks\patrol-shadow-config.json'),
-    [string]$JevShadowOutputDir = (Join-Path $PSScriptRoot 'downloads\jev-shadow')
+    [string]$JevShadowOutputDir = (Join-Path $PSScriptRoot 'downloads\jev-shadow'),
+    [string]$StateFile = (Join-Path $PSScriptRoot '..\state\patrol-state.json')
 )
 $ErrorActionPreference = 'Stop'
 try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
 . (Join-Path $PSScriptRoot 'patrol-provider.ps1')
+. (Join-Path $PSScriptRoot 'patrol-state.ps1')
 $AdapterName = if($env:PATROL_ADAPTER){ $env:PATROL_ADAPTER } else { 'local-json' }
 # Jev 影子层是可选组件（本地业务扩展），不在本仓分发；缺它则本仓仍可独立运行。
 $JevShadowLib = Join-Path $PSScriptRoot 'JevShadow.ps1'
@@ -52,6 +55,8 @@ try {
     $roundStart = Get-Date
     $stamp = $roundStart.ToString('yyyyMMdd-HHmmss')
     $items = @(Get-PatrolProviderItems -Provider $Provider)
+    $state = Read-PatrolState -Path $StateFile
+    $items = @(Merge-PatrolState -Items $items -State $state)
     $PriorityOrder = @{ 'P0' = 0; 'P1' = 1; 'P2' = 2 }
     $DefaultIntervalMin = 60
     $now = Get-Date
@@ -152,8 +157,8 @@ try {
         }
     }
 
-    # ---- 第4层 sync-back: 落盘（经 provider 契约，不认厂商） ----
-    Save-PatrolProviderItems -Provider $Provider -Items $items
+    # ---- 第4层 sync-back: 运行态外置（源只读） ----
+    Save-PatrolState -Path $StateFile -Items $items
 
     # ---- 第6层 output: digest json + md + memory 追加 ----
     $digest = [pscustomobject]@{
