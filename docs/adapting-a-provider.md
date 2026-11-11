@@ -23,6 +23,18 @@
 适应性不在「能接多少家」，而在「接新源时没有人需要重新理解调度器」。core 的边界是硬的：
 `patrol-provider.ps1` 只认 3 个槽位与「`args` 键 = 函数参数名」，`patrol-loop.ps1` 只认 item 字段。
 
+### 0.1 面向 Agent 的接入（下游是大模型 agent 时）
+
+接新场景的 agent 通常不必读源码，**接口层就够了**：
+
+- 描述文件 `adapters/<name>.adapter.json`（11 键 + optional）：provider 名、module、args、itemsPath、fieldMap
+- 模块契约三个函数：`Get-PatrolItems` / `Save-PatrolItems` / `Resolve-ItemName`（返回与 `schemas/item.schema.json` 同形的 item）
+- 跑法：`pwsh -File scripts/patrol-loop.ps1 -Adapter <name> -TasksFile <file> -Once -DryRun`，JSON 走 stdout
+- 离线自测：`pwsh -File tests/verify-<name>-adapter.ps1`（无凭据、无网络，CI 真跑）
+- 判断下一步做什么：提示词 `prompts/decide-next-action.md`，回答交给 `scripts/decide-next-action.ps1` 解析
+
+要改行为时才读 §1（边界）与 §5（何时动核心）；要动手时照 §2 的 8 步清单。
+
 ---
 
 ## 1. 边界：哪些是核心、哪些只是 adapter
@@ -185,6 +197,11 @@ threadId=(null)  fake=False  lastRun=(null)
 | `Import-PatrolProvider` 装完调用报「找不到参数 ItemsPath」 | **同一会话里先 dot-source 过该模块**：装配层按「dot-source 前后的函数正文快照」判定谁装了哪些函数，正文相同 = 认为函数已存在 → 跳过登记 | 别在同一进程混用两种装载方式；直连测试请分进程（`verify-command-adapter.ps1` 的 parity 段就是这么做的） |
 | 契约自测报 `list-items() 返回 0 行` | 源真的空，或过滤条件筛空 | 空源算 FAIL 是刻意的（防止「没读到」伪装成「没有活」）；给真实样本 |
 | CI 上红、本机绿 | fixture 依赖本机路径 / 网络 / 时钟 | fixture 只用 `$PSScriptRoot` 推路径、不联网、不看时间 |
+| 位表类源：单元素数组被解包 | 从 `if` 语句取值，语句输出进管线会被枚举，数组只剩首元素 | 赋值语句取值（`$v = $src[$j]`），别用 `$v = if (...) { $src[$j] }` |
+| 位表类源：列名与列序错位 | 按名索骥遇上重名列，后一列静默覆盖前一列 | 采集前校验重名（重名即拒采），并断言每行单元数 = 列数 |
+| 位表类源：时间形状漂移 | 时间列可能是 ISO 串，也可能是 epoch 数字 | 按原类型保留：数字就还是数字，串就保持原时区后缀 |
+| 位表类源：select 词表外取值 | 新增选项不在受控词表内，宽松正则会当自由文本放行 | 词表缺条目即 fail-closed（先登记词表再采），非法值拒写表 |
+| 位表类源：分页截断 | 只取首页（has_more=true）就当全表 | 先分页取全；has_more 为真即拒绝采样 |
 
 ---
 
