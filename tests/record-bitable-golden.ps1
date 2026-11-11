@@ -257,6 +257,16 @@ function Hide-StructuredValue {
         return Hide-StructuredNumber -Value $Value -Seed $Seed
     }
     if ($Value -is [System.Management.Automation.PSCustomObject]) {
+    if ($Value -is [byte[]]) {
+        # byte[] 也是 IEnumerable，不拦住就会被枚举成数字数组：形状变了（不是泄漏，
+        # 但样本入库存的是字节，换成长度相同的假字节更贴真实形状）
+        $bytes = [byte[]]::new($Value.Length)
+        for ($b = 0; $b -lt $Value.Length; $b++) {
+            $hex = Get-FakeToken -Seed ($Seed + '/byte' + $b) -Length 2 -Alphabet '0123456789abcdef'
+            $bytes[$b] = [Convert]::ToByte($hex, 16)
+        }
+        return ,$bytes
+    }
         $dict = [ordered]@{}
         foreach ($p in $Value.PSObject.Properties) { $dict[$p.Name] = $p.Value }
         return Hide-StructuredValue -Value $dict -Seed $Seed -Key $Key
