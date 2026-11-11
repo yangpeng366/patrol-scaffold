@@ -15,6 +15,7 @@
 
 ### Added
 
+- **`tests/record-bitable-golden.ps1`：可重采的脱敏黄金样本。** 用真实 `lark-cli base +record-list --format json` 取表，按固定规则脱敏（列名保留；文本转 `[虚构]`；仓库路径 / GitHub / thread id / 时间改虚构同型值；`rev` 固定 1000），一次采集即确定性输出（同表两次采集哈希相同）。矩阵形状（按列顺序的数组行、select 数组、link 对象数组、null 单元格）正是手写 fixture 盖不住的部分，故由本地对拍脚本直接消费；样本与 `verify-bitable-adapter.ps1` 仍按 `.gitignore` 留在本地，脚本入库，换机可重采。
 - **`tests/verify-install-drift.ps1`：安装后 / 升级后的哈希漂移门禁**。此前 skill 同步完只能手工核哈希：
   漏装新文件、拿到旧版内容、编辑器加 BOM、把本地实验脚本一起拷进 skill 目录，都不会有人报错。现在一条
   命令把「已安装 skill 与仓库受控文件一致」变成会红的事实：`-InstalledPath <已安装目录>` 逐文件比 SHA256，
