@@ -6,6 +6,9 @@
     cover: text, a user object, an attachment object, lookup / formula objects,
     and a link to another selected row. The capture must either remove every
     sentinel or fail before writing a file.
+    Second half: the sample is mutated back into a leaky shape (Windows path,
+    multi-line prose, a 4-character code, a real user name) and -CheckOnly must
+    reject each one — blacklist-only matching cannot see any of those four.
 #>
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
@@ -86,7 +89,7 @@ function New-RawTable {
         }),
         @([ordered]@{ file_token = 'file_SECRET_TOKEN'; name = 'secret-file.txt'; url = 'https://internal.example/file'; size = 42; type = 'file' }),
         @([ordered]@{ text = 'LOOKUP SECRET'; id = 'recLookupReal' }),
-        @([ordered]@{ value = 'FORMULA SECRET'; type = 'text' })
+        @([ordered]@{ value = 'FORMULA SECRET'; type = 'text'; amount = 987654321 })
     )
     $values2 = @(
         'SECOND SECRET NAME', '中等', '兴趣研究', $false, '只读', 'SECOND NOTE',
@@ -176,6 +179,35 @@ try {
     Assert-True ($parent -is [array] -and $parent[0].id -eq (@($golden.data.record_id_list)[1])) 'parent link does not point at the selected record'
     Assert-True ($timestamp -match '^2026-01-\d{2}T09:\d{2}:00\.000\+08:00$') 'datetime string shape drifted'
     Assert-True ($epoch -is [long] -and $epoch -gt 1700000000000) 'numeric epoch changed to a string'
+
+    # 结构化单元格里的数字（公式金额 / 计数）也是真实内容：换值，但保持数字类型与位数
+    Assert-True ($formula[0].amount -ne 987654321) 'formula 对象里的数字被原样拷进了样本'
+    Assert-True ($formula[0].amount -is [long] -or $formula[0].amount -is [int]) 'formula 数字丢了数字类型'
+    Assert-True ([string]$formula[0].amount -match '^\d{9}$') 'formula 数字丢了位数'
+
+    # 干净样本必须能通过 -CheckOnly（防止正向白名单把正常输出误判成泄漏）
+    $clean = & pwsh -NoProfile -File $sanitizer -CheckOnly -Out $outPath 2>&1 | Out-String
+    Assert-True ($LASTEXITCODE -eq 0) ("clean sample rejected by -CheckOnly:`n" + $clean)
+
+    # ——— 反向白名单：把已脱敏样本里的一格换回真实形态，-CheckOnly 必须判红 ———
+    # 四条分别对旧自检的四种漏网：含反斜杠的 Windows 路径（JSON 里被转义成 \\）、
+    # 分段中文叙述（换行同样被转义）、低于片段比对门槛的 4 字符短值、以及结构化对象里的真实姓名。
+    $leakCases = @(
+        @{ Name = 'leak-path'; Column = '用户批注'; Value = 'D:\secret\repo' },
+        @{ Name = 'leak-multiline'; Column = '用户批注'; Value = "第一行真实叙述`n第二行真实叙述" },
+        @{ Name = 'leak-short'; Column = '用户批注'; Value = 'acme' },
+        @{ Name = 'leak-user'; Column = '用户对象'; Value = @([ordered]@{ id = 'ou_0123456789abcdef0123456789abcdef'; name = '张三' }) }
+    )
+    foreach ($leak in $leakCases) {
+        $mut = $text | ConvertFrom-Json -AsHashtable -DateKind String
+        $mutIndex = @($mut.data.fields).IndexOf($leak.Column)
+        Assert-True ($mutIndex -ge 0) ('夹具缺列：' + $leak.Column)
+        $mut.data.data[0][$mutIndex] = $leak.Value
+        $mutPath = Join-Path $tmp ($leak.Name + '.json')
+        [System.IO.File]::WriteAllText($mutPath, (ConvertTo-Json -InputObject $mut -Depth 30), $utf8)
+        $mutRun = & pwsh -NoProfile -File $sanitizer -CheckOnly -Out $mutPath 2>&1 | Out-String
+        Assert-True ($LASTEXITCODE -ne 0) ('CheckOnly 放过了泄漏：' + $leak.Name + "`n" + $mutRun)
+    }
 
     # An unknown select option must fail closed, not be copied into the sample.
     $bad = New-RawTable

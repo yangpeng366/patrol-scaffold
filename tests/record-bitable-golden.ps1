@@ -49,6 +49,10 @@
     5. 采集后自检（不过就不写文件）：样本里不得出现原始 record id / 原始 field id /
        任一被脱敏列的原始值、`github.com`、`gitAll`、`soboy`/`sobey`、邮件地址、明文 http://；
        https:// 只允许 example.invalid；text 列不得有超过 64 字符的单元格。
+       片段比对只在「样本单元格的值」上做（不做在整份 JSON 上）：整份 JSON 里有列名会误报，
+       而 JSON 把 `\` / 换行转义后，含 Windows 路径或分段叙述的原文永远匹配不到。
+       另有正向白名单 Assert-FakeCellShape：逐格断言只能出现虚构形态，穷举、与原始表无关，
+       所以 -CheckOnly 也是真的在查内容，而不只是查形态。
 
     产物：tests/fixtures/bitable-record-list.golden.json（UTF-8 无 BOM，2 空格缩进）
 
@@ -73,7 +77,9 @@ param(
     # 最多保留几行（特征清单命中行，按表序）
     [int]$MaxRows = 8,
     # 单行虚构文本的上限；原值更短时保持等长，用来保留长度相关断言
-    [int]$MaxTextLength = 256,
+    # 默认 64 与上面「text 列不得有超过 64 字符的单元格」的约定一致（改默认会让已入库样本
+    # 与新采样本的行宽口径不同，等于把 64 字符断言变成一条空断言）。
+    [int]$MaxTextLength = 64,
     # 离线读取一份原始 record-list JSON（测试用）；给了就不联网、不读 token
     [string]$RawJson = '',
     # 只校验已有样本的脱敏与形状，不采集
@@ -193,7 +199,43 @@ function Get-FakeStructuredId {
         $length = $Matches.body.Length
         return $prefix + (Get-FakeToken -Seed $Seed -Length $length)
     }
+    # 不带下划线的 token（file_token 的 boxcn…、table_id 的 tbl…、user_id 的 8 位十六进制）
+    # 原来统一变成 `id_` + 16 字符，长度与字符集都变了，黄金样本就不再是「同形态」输入。
+    # 保留长度 + 字符集，前缀丢失无所谓（适配器只用 rec/fld/ou_ 前缀做语义区分）。
+    if ($Value -match '^[0-9a-fA-F]{8,32}$') {
+        return Get-FakeToken -Seed $Seed -Length $Value.Length -Alphabet '0123456789abcdef'
+    }
+    if ($Value -match '^[0-9A-Za-z]{8,64}$') {
+        return Get-FakeToken -Seed $Seed -Length $Value.Length
+    }
     return 'id_' + (Get-FakeToken -Seed $Seed -Length 16)
+}
+
+# 结构化单元格（公式 / 查找引用 / 附件元数据）里的数字同样是原始内容：金额、计数、时间戳。
+# 保留原类型与位数，只把数值换成由 seed 决定的虚构值。0 与布尔是结构性取值，保持原样。
+function Get-FakeDigits {
+    param([string]$Seed, [int]$Count)
+    if ($Count -lt 1) { return '0' }
+    $digits = Get-FakeToken -Seed $Seed -Length $Count -Alphabet '0123456789'
+    # 首位不能是 0，否则位数会缩一档
+    if ($digits[0] -eq '0') { $digits = '1' + $digits.Substring(1) }
+    return $digits
+}
+
+function Hide-StructuredNumber {
+    param($Value, [string]$Seed)
+    if ($Value -is [bool]) { return $Value }
+    $abs = [Math]::Abs([double]$Value)
+    # 0 与纯小数没有可用位数可换，留着（不携带项目信息）
+    if ($abs -lt 1) { return $Value }
+    $digits = [int][Math]::Floor([Math]::Log10($abs)) + 1
+    if ($digits -gt 18) { $digits = 18 }
+    $fake = [int64]::Parse((Get-FakeDigits -Seed $Seed -Count $digits))
+    if ([double]$Value -lt 0) { $fake = -$fake }
+    if ($Value -is [int]) { return [int][Math]::Min($fake, [int]::MaxValue) }
+    if ($Value -is [long]) { return [int64]$fake }
+    if ($Value -is [decimal]) { return [decimal]$fake }
+    return [double]$fake
 }
 
 # Any object/array that is not covered by a column rule goes through this recursive cleaner.
@@ -207,7 +249,12 @@ function Hide-StructuredValue {
         if ($Value -match '^[^@\s]+@[^@\s]+$') { return 'user@example.invalid' }
         return Hide-FreeText -Text $Value
     }
-    if ($Value -is [bool] -or $Value -is [int] -or $Value -is [long] -or $Value -is [double] -or $Value -is [decimal]) { return $Value }
+    if ($Value -is [bool]) { return $Value }
+    if ($Value -is [int] -or $Value -is [long] -or $Value -is [double] -or $Value -is [decimal]) {
+        # 原来是原样返回：公式 / 查找引用里的金额与计数就是真实数据，且 Get-StringLeaves
+        # 不收集数字，连自检都看不见它。改成同类型同位数的虚构值。
+        return Hide-StructuredNumber -Value $Value -Seed $Seed
+    }
     if ($Value -is [System.Management.Automation.PSCustomObject]) {
         $dict = [ordered]@{}
         foreach ($p in $Value.PSObject.Properties) { $dict[$p.Name] = $p.Value }
@@ -266,6 +313,15 @@ $script:VocabularyValues = @{
 }
 $script:VocabularyPattern = '^[\p{L}\p{N}()（）._\- ]{1,32}$'
 
+# 正向白名单：一个字符串叶子只要出现在样本里，就必须是 sanitizer 能产出的虚构形态之一。
+# 这是黑名单（Get-ForbiddenFragments）够不到的兜底：4~5 字符的短值原本既不做整值比对
+# 也不做窗口比对；分段叙述 / 含反斜杠的原文在序列化后的 JSON 里根本匹配不到。
+# 按列类型分档，text 列只容许「[虚构]+虚」，免得通用的 `前缀_主体` 形态把真 open_id 也放过。
+$script:FakeTextLine = '^(?:\[虚构\]虚*|虚+)$'
+$script:FakeTimeValue = '^(?:2026-01-\d{2}T09:\d{2}:00\.000(?:\+08:00|Z)?|\d{10,13})$'
+$script:FakeUrlValue = '^https://example\.invalid/[A-Za-z0-9/_.\-]*$'
+$script:FakeStructuredLeaf = '(?i)^(?:https://example\.invalid/[A-Za-z0-9/_.\-]*|user@example\.invalid|rec[0-9a-z]{12}|fld[0-9a-z]{7}|ou_[0-9a-f]{32}|id_[0-9a-z]{16}|[A-Za-z]{2,6}_[0-9A-Za-z_\-]+|2026-01-\d{2}T09:\d{2}:00\.000(?:\+08:00|Z)?|\d{10,13}|\[虚构\]虚*|虚+)$'
+
 # 采样与行选择会按名索骥；缺列时不要继续生成一份错位样本。
 $script:RequiredColumns = @($script:VocabularyColumns + $script:ShapeColumns + @('巡检间隔(分钟)', '假数据模式')) | Sort-Object -Unique
 
@@ -300,7 +356,8 @@ function Get-NormalizedFieldType {
     if ($s -eq '18') { return 'link' }
     if ($s -eq '19') { return 'lookup' }
     if ($s -eq '20') { return 'formula' }
-    if ($s -eq '21') { return 'duoshu' }
+    # 21 = 双向关联（旧名 duoshu）；它和 18 单向关联一样返回 [{id,text}] 数组，按 link 处理
+    if ($s -eq '21') { return 'link' }
     if ($s -eq '22') { return 'location' }
     if ($s -eq '23') { return 'group_chat' }
     if ($s -eq '1001') { return 'created_time' }
@@ -378,6 +435,10 @@ function Assert-TableShape {
     if ($fields.Count -ne $fieldIds.Count) { throw ('fields={0} 与 field_id_list={1} 数量不一致' -f $fields.Count, $fieldIds.Count) }
     if ($fields.Count -ne $fieldTypes.Count) { throw ('fields={0} 与 field_type_list={1} 数量不一致' -f $fields.Count, $fieldTypes.Count) }
     if ($matrix.Count -ne $recordIds.Count) { throw ('data={0} 行与 record_id_list={1} 数量不一致' -f $matrix.Count, $recordIds.Count) }
+    # 重名列会让 Select-GoldenRows 的按名取列与 $typeOf 默默被后一列覆盖（采集出「看起来对」
+    # 但列错位的样本），飞书前端虽不允许重名，导入/改名仍可能造出来，所以在这里 fail-closed。
+    $dupes = @($fields | Group-Object | Where-Object { $_.Count -gt 1 } | ForEach-Object { [string]$_.Name })
+    if ($dupes.Count -gt 0) { throw ('方向表有重名列：{0}；按名取列会错位，拒绝采样' -f ($dupes -join ', ')) }
     for ($i = 0; $i -lt $matrix.Count; $i++) {
         if (@($matrix[$i]).Count -ne $fields.Count) { throw ('第 {0} 行有 {1} 个单元，fields 有 {2} 个；列错位时拒绝采样' -f $i, @($matrix[$i]).Count, $fields.Count) }
     }
@@ -450,6 +511,68 @@ function Get-StringLeaves {
     return ,$out.ToArray()
 }
 
+# 样本里「单元格里的字符串」——片段比对只在这些值上做，不碰字段名，也不经 JSON 序列化。
+# 两个原因：字段名也进 haystack 会把「某一格的值恰好等于某列名」误判成泄漏；
+# 而 JSON 把 `\` 逃逸成 `\\`、换行逃逸成 `\n` 后，含 Windows 路径或分段叙述的原文
+# 永远匹配不到（那是本工具最需要查住的形态）。这里拿的是反序列化之后的值本身。
+function Get-SampleValueLeaves {
+    param($Sample)
+    $out = [System.Collections.Generic.List[string]]::new()
+    foreach ($row in @($Sample.data.data)) {
+        foreach ($cell in @($row)) {
+            foreach ($s in (Get-StringLeaves -Value $cell)) { $out.Add($s) }
+        }
+    }
+    foreach ($id in @($Sample.data.record_id_list)) { if ($null -ne $id) { $out.Add([string]$id) } }
+    return , $out.ToArray()
+}
+
+# 正向契约：每一格只能出现 sanitizer 能产出的虚构形态。
+# 它不需要原始表在场，所以 -CheckOnly 也从「只验形状」变成「真的验内容」；
+# 同时覆盖了黑名单的两种盲区：4~5 字符短值（低于整值比对门槛）与分段叙述（转义后匹配不到）。
+function Assert-FakeCellShape {
+    param($Sample)
+    $problems = [System.Collections.Generic.List[string]]::new()
+    $fields = @($Sample.data.fields)
+    $types = @()
+    if ($null -ne $Sample.data.field_type_list) { $types = @($Sample.data.field_type_list) }
+    for ($j = 0; $j -lt $fields.Count; $j++) {
+        $column = [string]$fields[$j]
+        # 词表列走 allowlist 断言；形状列走各自的形态断言；数字/复选框没有字符串叶子
+        if ($script:VocabularyColumns -contains $column) { continue }
+        if ($script:ShapeColumns -contains $column) { continue }
+        $type = 'text'
+        if ($j -lt $types.Count) { $type = Get-NormalizedFieldType -Value $types[$j] }
+        if ($type -in @('number', 'auto_number', 'checkbox')) { continue }
+        # 按列类型选白名单：text/phone 只容「[虚构]+虚」（即使值长得像 ou_... 也不行），
+        # 时间列只容虚构时间串，url 列只容 example.invalid，结构化列才用宽口径（假 id/邮箱/自由文本）。
+        $pattern = switch ($type) {
+            { $_ -in @('text', 'phone') } { $script:FakeTextLine }
+            { $_ -in @('datetime', 'created_time', 'modified_time') } { $script:FakeTimeValue }
+            'url' { $script:FakeUrlValue }
+            default { $script:FakeStructuredLeaf }
+        }
+        foreach ($row in @($Sample.data.data)) {
+            foreach ($text in (Get-StringLeaves -Value $row[$j])) {
+                foreach ($line in [regex]::Split($text, "(`r`n|`n|`r)")) {
+                    if ($line.Length -eq 0) { continue }
+                    # [regex]::Split 带捕获组时会把分隔符本身也留在结果里（`r`n / `n / `r），
+                    # 那不是文本内容，得先跳过；否则每一段都会白白报一条。
+                    if ($line -match '^(\r\n|\n|\r)$') { continue }
+                    if ($line -notmatch $pattern) {
+                        # 只回显前 2 字并压掉控制字符：报错信息不能反过来把真实值泄到 CI 日志里
+                        $preview = ($line -replace '[\r\n\t]', ' ')
+                        $problems.Add(('列 {0} 的单元格不像虚构值（长度 {1}，前 2 字：{2}…）；可能漏了一类形状' -f $column, $line.Length, $preview.Substring(0, [Math]::Min(2, $preview.Length))))
+                        break
+                    }
+                }
+                if ($problems.Count -ge 8) { return , @($problems) }
+            }
+        }
+    }
+    return , @($problems)
+}
+
 function Get-ForbiddenFragments {
     param($Raw, [string[]]$Fields)
     $frags = [System.Collections.Generic.HashSet[string]]::new()
@@ -475,15 +598,17 @@ function Get-ForbiddenFragments {
                 # strict check into a noisy one. Whole-value comparison already catches
                 # a leaked token, so skip the windows for anything without prose.
                 if ($text -notmatch '\s' -and $text -notmatch '[\u4e00-\u9fff]') { continue }
+                # 原来的步长 (len-8)/4 让任何长文本都只取到 5 个窗口，中间大段永远取不到，
+                # 和注释里的「滑窗」不是一回事。改成等距、最多 9 个窗口（含末尾一窗）。
+                # 真正的穷举兜底是 Assert-FakeCellShape 的整格白名单；这里是粗网，
+                # 避免在「全表行 × 全列」上生成百万级片段把采集拖成分钟级。
+                $step = [Math]::Max(1, [int][Math]::Ceiling(($text.Length - 8) / 8.0))
                 $start = 0
-                while ($start -lt $text.Length) {
+                while ($start -le $text.Length - 4) {
                     $len = [Math]::Min(8, $text.Length - $start)
-                    if ($len -ge 4) {
-                        $frag = $text.Substring($start, $len)
-                        if ($frag -notmatch '^[0-9\s:.,，。()（）\-—/+]+$' -and $frag -notmatch '^https?://?$') { [void]$frags.Add($frag) }
-                    }
-                    if ($start + 8 -ge $text.Length) { break }
-                    $start += [Math]::Max(1, [int][Math]::Floor(($text.Length - 8) / 4))
+                    $frag = $text.Substring($start, $len)
+                    if ($frag -notmatch '^[0-9\s:.,，。()（）\-—/+]+$' -and $frag -notmatch '^https?://?$') { [void]$frags.Add($frag) }
+                    $start += $step
                 }
             }
         }
@@ -496,9 +621,12 @@ function Assert-SampleSanitized {
     $problems = [System.Collections.Generic.List[string]]::new()
     $json = ConvertTo-Json -InputObject $Sample -Depth 30
 
+    # 片段只在样本的「值」上找，不在整份 JSON 上找（理由见 Get-SampleValueLeaves）：
+    # 整份 JSON 既会因字段名误报，也会因 `\` / 换行被转义而漏报。
+    $haystack = (Get-SampleValueLeaves -Sample $Sample) -join "`u{0}"
     foreach ($frag in (Get-ForbiddenFragments -Raw $Raw -Fields $Fields)) {
         if ($frag.Length -lt 4) { continue }
-        if ($json.IndexOf($frag, [System.StringComparison]::Ordinal) -ge 0) {
+        if ($haystack.IndexOf($frag, [System.StringComparison]::Ordinal) -ge 0) {
             $problems.Add(('残留原始片段（长度 {0}，前 2 字：{1}…）' -f $frag.Length, $frag.Substring(0, [Math]::Min(2, $frag.Length))))
             if ($problems.Count -ge 8) { break }
         }
@@ -556,6 +684,24 @@ function Assert-SampleSanitized {
             }
         }
     }
+
+    # 样本自身的形状不变式：行数 / 列宽与信封一致（-CheckOnly 也查，防止手改样本后列错位）
+    $sampleFields = @($Sample.data.fields)
+    $sampleRows = @($Sample.data.data)
+    $sampleIds = @($Sample.data.record_id_list)
+    if ($sampleRows.Count -ne $sampleIds.Count) {
+        $problems.Add(('样本 data={0} 行与 record_id_list={1} 数量不一致' -f $sampleRows.Count, $sampleIds.Count))
+    }
+    for ($i = 0; $i -lt $sampleRows.Count; $i++) {
+        if (@($sampleRows[$i]).Count -ne $sampleFields.Count) {
+            $problems.Add(('样本第 {0} 行有 {1} 个单元，fields 有 {2} 个' -f $i, @($sampleRows[$i]).Count, $sampleFields.Count))
+            break
+        }
+    }
+
+    # 正向契约：逐格断言只能出现虚构形态（穷举；与原始表在不在场无关）
+    foreach ($p in (Assert-FakeCellShape -Sample $Sample)) { $problems.Add('白名单：' + $p) }
+
     return , @($problems)
 }
 
