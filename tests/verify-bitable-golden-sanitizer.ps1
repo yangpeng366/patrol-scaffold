@@ -64,6 +64,7 @@ function New-RawTable {
     & $add '附件' 'attachment'
     & $add '查找' 'lookup'
     & $add '公式' 'formula'
+    & $add '位置' 'location'
 
     $row1 = [System.Collections.Generic.List[object]]::new()
     $row2 = [System.Collections.Generic.List[object]]::new()
@@ -89,7 +90,8 @@ function New-RawTable {
         }),
         @([ordered]@{ file_token = 'file_SECRET_TOKEN'; name = 'secret-file.txt'; url = 'https://internal.example/file'; size = 42; type = 'file' }),
         @([ordered]@{ text = 'LOOKUP SECRET'; id = 'recLookupReal' }),
-        @([ordered]@{ value = 'FORMULA SECRET'; type = 'text'; amount = 987654321 })
+        @([ordered]@{ value = 'FORMULA SECRET'; type = 'text'; amount = 987654321 }),
+        @([ordered]@{ latitude = 39.915012; longitude = 116.404061; address = '真实地址 SENSITIVE' })
     )
     $values2 = @(
         'SECOND SECRET NAME', '中等', '兴趣研究', $false, '只读', 'SECOND NOTE',
@@ -102,7 +104,8 @@ function New-RawTable {
         @([ordered]@{ id = 'ou_abcdefabcdefabcdefabcdefabcdefab'; name = 'SECOND USER' }),
         @([ordered]@{ file_token = 'file_SECOND_TOKEN'; name = 'second.txt'; url = 'https://internal.example/second' }),
         'LOOKUP SECOND',
-        'FORMULA SECOND'
+        'FORMULA SECOND',
+        @([ordered]@{ latitude = 31.230416; longitude = 121.473701; address = 'SECOND ADDRESS' })
     )
     foreach ($v in $values1) { & $addCell $row1 $v }
     foreach ($v in $values2) { & $addCell $row2 $v }
@@ -151,10 +154,17 @@ try {
     $run = Invoke-Sanitizer -RawPath $rawPath -OutPath $outPath
     Assert-True ($run.ExitCode -eq 0) ("sanitizer failed:`n" + $run.Output)
     $text = [System.IO.File]::ReadAllText($outPath)
-    foreach ($sentinel in @(
+    # 哨兵覆盖：自由文本、组织名、open_id、file_token、查找/公式内容、真实域名，
+    # 以及原始 record id / field id / 本地路径 / 会话前缀（这些旧版自检看不到）。
+    $sentinels = @(
         'SECRET', 'secret-org', 'ou_1234567890abcdef1234567890abcdef',
-        'file_SECRET_TOKEN', 'LOOKUP SECRET', 'FORMULA SECRET', 'github.com', 'internal.example'
-    )) {
+        'file_SECRET_TOKEN', 'LOOKUP SECRET', 'FORMULA SECRET', 'github.com', 'internal.example',
+        'recReal1', 'recReal2', 'recLookupReal', 'D:\secret\repo',
+        'mvs_abcdefghijklmnopqrstuvwx', 'mvs_zyxwvutsrqponmlkjihgfedc',
+        '123e4567-e89b-12d3-a456-426614174000', '39.915012', '116.404061', '31.230416', '121.473701'
+    )
+    foreach ($fid in @($raw.data.field_id_list)) { $sentinels += [string]$fid }
+    foreach ($sentinel in $sentinels) {
         Assert-True (-not $text.Contains($sentinel, [System.StringComparison]::OrdinalIgnoreCase)) ("leaked sentinel: " + $sentinel)
     }
 
@@ -165,6 +175,7 @@ try {
     $attachment = $row1[$fields.IndexOf('附件')]
     $lookup = $row1[$fields.IndexOf('查找')]
     $formula = $row1[$fields.IndexOf('公式')]
+    $location = $row1[$fields.IndexOf('位置')]
     $parent = $row1[$fields.IndexOf('父记录')]
     $timestamp = $row1[$fields.IndexOf('最近执行时间')]
     $epoch = $golden.data.data[1][$fields.IndexOf('最近执行时间')]
@@ -184,6 +195,12 @@ try {
     Assert-True ($formula[0].amount -ne 987654321) 'formula 对象里的数字被原样拷进了样本'
     Assert-True ($formula[0].amount -is [long] -or $formula[0].amount -is [int]) 'formula 数字丢了数字类型'
     Assert-True ([string]$formula[0].amount -match '^\d{9}$') 'formula 数字丢了位数'
+
+    # 位置列：经纬度是真实坐标，数字必须被换掉（数字叶子不参与字符串比对，漏了就是真泄漏）
+    Assert-True ($location -is [array] -and $location.Count -eq 1) 'location cell lost its array shape'
+    Assert-True ($location[0].latitude -ne 39.915012 -and $location[0].longitude -ne 116.404061) 'location 坐标被原样拷进了样本'
+    Assert-True ($location[0].latitude -is [double] -or $location[0].latitude -is [int] -or $location[0].latitude -is [long]) 'location 坐标丢了数字类型'
+    Assert-True ([string]$location[0].address -like '[[]虚构]*') 'location 地址没有被替换'
 
     # 干净样本必须能通过 -CheckOnly（防止正向白名单把正常输出误判成泄漏）
     $clean = & pwsh -NoProfile -File $sanitizer -CheckOnly -Out $outPath 2>&1 | Out-String

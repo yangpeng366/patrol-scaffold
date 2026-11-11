@@ -174,6 +174,7 @@ function Hide-Timestamp {
         return [long](1767225600000 + ($Ordinal * 60000))
     }
     $s = [string]$Value
+    if ($s.Length -eq 0) { return '' }
     if ($s -match '^\d{10}$') { return [long](1767225600 + ($Ordinal * 60)) }
     if ($s -match '^\d{13}$') { return [long](1767225600000 + ($Ordinal * 60000)) }
     if ($s -match '^\d{4}-\d{2}-\d{2}$') { return ('2026-01-{0:D2}' -f $day) }
@@ -330,13 +331,15 @@ function Assert-VocabularyValue {
     $text = [string]$Value
     if ($script:VocabularyValues.ContainsKey($Column)) {
         if ($script:VocabularyValues[$Column] -notcontains $text) {
-            throw ('列 {0} 的值「{1}」不在受控词表内；请先把该选项加入 VocabularyValues 再重采' -f $Column, $text)
+            # 报错只回显前 2 字：词表列的值也可能是真实项目名，进 CI 日志就是泄漏
+            throw ('列 {0} 的值不在受控词表内（长度 {1}，前 2 字：{2}…）；请先把该选项加入 VocabularyValues 再重采' -f $Column, $text.Length, $text.Substring(0, [Math]::Min(2, $text.Length)))
         }
         return $text
     }
-    if ($text -notmatch $script:VocabularyPattern) {
-        throw ('列 {0} 的值「{1}」不像受控选项；拒绝写入样本' -f $Column, $text)
-    }
+    # 词表列没有登记受控选项 = 无法判断这个值是不是分类。旧实现退回宽松正则，
+    # 任何 1~32 字符的自由文本都能原样进样本，而片段自检又把整列跳过，等于双重静默。
+    # 这里 fail-closed，与「未知 select 列」同一处置：先登记词表，再重采。
+    throw ('列 {0} 没有登记受控词表（VocabularyValues）；无法判断该值是分类还是项目数据，拒绝写入样本' -f $Column)
     return $text
 }
 
@@ -459,7 +462,14 @@ function Select-GoldenRows {
         return $row[$idx[$name]]
     }
     $criteria = @(
-        @{ Name = 'interval-zero'; Match = { param($r) (& $cellOf $r '巡检间隔(分钟)') -eq 0 } },
+        # PowerShell 的 -eq 对数组是筛选语义：[0,5] -eq 0 得 @(0) 且为真，
+        # 旧写法会把「间隔=[0,5]」的行走成「间隔=0」。这里只认标量数值 0。
+        @{ Name = 'interval-zero'; Match = { param($r)
+                $v = & $cellOf $r '巡检间隔(分钟)'
+                if ($null -eq $v -or $v -is [array]) { return $false }
+                if ($v -isnot [int] -and $v -isnot [long] -and $v -isnot [double] -and $v -isnot [decimal]) { return $false }
+                return ([double]$v -eq 0)
+            } },
         @{ Name = 'interval-null'; Match = { param($r) $null -eq (& $cellOf $r '巡检间隔(分钟)') } },
         @{ Name = 'fake-true'; Match = { param($r) (& $cellOf $r '假数据模式') -eq $true } },
         @{ Name = 'priority-p1'; Match = { param($r) $v = & $cellOf $r '优先级'; if ($v -is [array]) { $v = $v[0] }; [string]$v -eq 'P1' } },
@@ -539,7 +549,22 @@ function Assert-FakeCellShape {
     for ($j = 0; $j -lt $fields.Count; $j++) {
         $column = [string]$fields[$j]
         # 词表列走 allowlist 断言；形状列走各自的形态断言；数字/复选框没有字符串叶子
-        if ($script:VocabularyColumns -contains $column) { continue }
+        if ($script:VocabularyColumns -contains $column) {
+            # 词表列：反向校验「样本里的值仍在当前词表内」。采集时已经 fail-closed 过，
+            # 但 -CheckOnly 没有原始表可比：一份陈旧样本里的旧选项照样能过关，这里补上。
+            $allowedOptions = @()
+            if ($script:VocabularyValues.ContainsKey($column)) { $allowedOptions = @($script:VocabularyValues[$column]) }
+            foreach ($row in @($Sample.data.data)) {
+                foreach ($text in (Get-StringLeaves -Value $row[$j])) {
+                    if ($text.Length -eq 0) { continue }
+                    if ($allowedOptions -notcontains $text) {
+                        $problems.Add(('列 {0} 的值不在当前受控词表内（长度 {1}，前 2 字：{2}…）；样本可能已过期' -f $column, $text.Length, $text.Substring(0, [Math]::Min(2, $text.Length))))
+                    }
+                }
+            }
+            if ($problems.Count -ge 8) { return , @($problems) }
+            continue
+        }
         if ($script:ShapeColumns -contains $column) { continue }
         $type = 'text'
         if ($j -lt $types.Count) { $type = Get-NormalizedFieldType -Value $types[$j] }
