@@ -58,6 +58,7 @@ function Convert-BitableRowToItem {
     #   fake        只认 Bitable 复选框的真布尔 true；字符串 "true"/"1"/"是" 一律 false
     #   title/id/nextStep 去首尾空白；description/repoPath 等原样保留
     #   授权边界/协作形态/审批状态 有缺省值（自主 / sparse / 已通过），与 dsh 同默认
+    #   用户批注/贡献类型 缺列即空串；动作类型 空白即「无结构化答案」= 键不存在（dsh 侧是 undefined）
     #
     # 注：title 不再回退 record_id——契约层 scripts/patrol-provider.ps1::ConvertTo-PatrolItem
     # 在收口处用 id 补齐空标题（schema 要求 title minLength 1），解析层保持与 dsh 同形。
@@ -123,7 +124,13 @@ function Convert-BitableRowToItem {
     $approval = & $str (Get-BitableRowValue -Row $Row -Name $ApprovalField)
     if (-not $approval) { $approval = '已通过' }
 
-    return [pscustomobject]@{
+    $userNote = & $str (Get-BitableRowValue -Row $Row -Name '用户批注')
+    $contribution = & $str (Get-BitableRowValue -Row $Row -Name '贡献类型')
+    # dsh 把空白动作类型读成 undefined（键不存在），不是空串；这里保持同形。
+    $actionType = (& $str (Get-BitableRowValue -Row $Row -Name '动作类型')).Trim()
+    if (-not $actionType) { $actionType = $null }
+
+    $item = [pscustomobject]@{
         id          = (& $str (Get-BitableRowValue -Row $Row -Name 'record_id')).Trim()
         title       = (& $str (Get-BitableRowValue -Row $Row -Name $TitleField)).Trim()
         repoPath    = & $str (Get-BitableRowValue -Row $Row -Name $RepoPathField)
@@ -139,9 +146,13 @@ function Convert-BitableRowToItem {
         authorization = $authorization
         collaboration = $collaboration
         approval      = $approval
+        userNote      = $userNote
+        contribution  = $contribution
+        actionType    = $actionType
         pendingAction = & $str (Get-BitableRowValue -Row $Row -Name $PendingActionField)
         category      = & $str (Get-BitableRowValue -Row $Row -Name $CategoryField)
     }
+    return $item
 }
 
 function Get-PatrolItems {
