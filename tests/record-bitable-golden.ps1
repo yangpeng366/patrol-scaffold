@@ -72,12 +72,18 @@ param(
     [string]$Out = '',
     # 最多保留几行（特征清单命中行，按表序）
     [int]$MaxRows = 8,
+    # 单行虚构文本的上限；原值更短时保持等长，用来保留长度相关断言
+    [int]$MaxTextLength = 256,
+    # 离线读取一份原始 record-list JSON（测试用）；给了就不联网、不读 token
+    [string]$RawJson = '',
     # 只校验已有样本的脱敏与形状，不采集
     [switch]$CheckOnly
 )
 
 $ErrorActionPreference = 'Stop'
 $script:Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+$script:TextLimit = [Math]::Max(16, $MaxTextLength)
+$script:RecordIdMap = @{}
 $repoRoot = Split-Path -Parent $PSScriptRoot
 if (-not $Out) { $Out = Join-Path (Join-Path $repoRoot 'tests\fixtures') 'bitable-record-list.golden.json' }
 
@@ -115,7 +121,7 @@ function Hide-FreeText {
     foreach ($part in $parts) {
         if ($part -eq "`r`n" -or $part -eq "`n" -or $part -eq "`r") { [void]$sb.Append($part); continue }
         if ($part.Length -eq 0) { continue }
-        $n = [Math]::Min($part.Length, 64)
+        $n = [Math]::Min($part.Length, $script:TextLimit)
         if ($n -le 4) { [void]$sb.Append('虚' * $n) }
         else { [void]$sb.Append('[虚构]' + ('虚' * ($n - 4))) }
     }
@@ -152,33 +158,90 @@ function Hide-Id {
 }
 
 function Hide-Timestamp {
-    param([string]$Value, [int]$Ordinal)
-    if ($Value -match 'Z$') { return ('2026-01-{0:D2}T09:{1:D2}:00.000Z' -f ((($Ordinal) % 9) + 1), (($Ordinal * 7) % 60)) }
-    # 若 JSON 被解析成 [datetime]（未带 -DateKind String 的旧环境），仍给出同型虚构串
-    return ('2026-01-{0:D2}T09:{1:D2}:00.000+08:00' -f ((($Ordinal) % 9) + 1), (($Ordinal * 7) % 60))
+    param($Value, [int]$Ordinal)
+    # Preserve the type and the offset spelling. A numeric epoch stays numeric; a Z / +08:00
+    # string keeps that suffix. The day/minute are synthetic and deterministic.
+    $day = (($Ordinal % 9) + 1)
+    $minute = (($Ordinal * 7) % 60)
+    if ($Value -is [int] -or $Value -is [long] -or $Value -is [double] -or $Value -is [decimal]) {
+        if ([string]$Value -match '^\d{10}$') { return [long](1767225600 + ($Ordinal * 60)) }
+        return [long](1767225600000 + ($Ordinal * 60000))
+    }
+    $s = [string]$Value
+    if ($s -match '^\d{10}$') { return [long](1767225600 + ($Ordinal * 60)) }
+    if ($s -match '^\d{13}$') { return [long](1767225600000 + ($Ordinal * 60000)) }
+    if ($s -match '^\d{4}-\d{2}-\d{2}$') { return ('2026-01-{0:D2}' -f $day) }
+    if ($s -match '(?<offset>[+-]\d{2}:\d{2})$') {
+        $offset = [string]$Matches.offset
+        return ('2026-01-{0:D2}T09:{1:D2}:00.000{2}' -f $day, $minute, $offset)
+    }
+    if ($s -match 'Z$') { return ('2026-01-{0:D2}T09:{1:D2}:00.000Z' -f $day, $minute) }
+    return ('2026-01-{0:D2}T09:{1:D2}:00.000' -f $day, $minute)
 }
 
-# 父记录是 link 列：数组里的对象可能带 id / text
+function Get-FakeStructuredId {
+    param([string]$Value, [string]$Seed)
+    if ($Value -match '^rec[0-9A-Za-z]+$') {
+        if ($script:RecordIdMap.ContainsKey($Value)) { return $script:RecordIdMap[$Value] }
+        return 'rec' + (Get-FakeToken -Seed $Seed -Length 12)
+    }
+    if ($Value -match '^ou_[0-9a-fA-F]+$') { return 'ou_' + (Get-FakeToken -Seed $Seed -Length 32 -Alphabet '0123456789abcdef') }
+    if ($Value -match '^fld[0-9A-Za-z]+$') { return 'fld' + (Get-FakeToken -Seed $Seed -Length 7)
+    }
+    if ($Value -match '^(?<prefix>[A-Za-z]{2,6}_)(?<body>[0-9A-Za-z_-]+)$') {
+        $prefix = [string]$Matches.prefix
+        $length = $Matches.body.Length
+        return $prefix + (Get-FakeToken -Seed $Seed -Length $length)
+    }
+    return 'id_' + (Get-FakeToken -Seed $Seed -Length 16)
+}
+
+# Any object/array that is not covered by a column rule goes through this recursive cleaner.
+# Nothing is passed through: an unknown object key is cleaned by its value, not copied.
+function Hide-StructuredValue {
+    param($Value, [string]$Seed, [string]$Key = '')
+    if ($null -eq $Value) { return $null }
+    if ($Value -is [string]) {
+        if ($Key -match '(?i)(url|link|href|avatar)') { return 'https://example.invalid/structured' }
+        if ($Value -match '^https?://') { return 'https://example.invalid/structured' }
+        if ($Value -match '^[^@\s]+@[^@\s]+$') { return 'user@example.invalid' }
+        return Hide-FreeText -Text $Value
+    }
+    if ($Value -is [bool] -or $Value -is [int] -or $Value -is [long] -or $Value -is [double] -or $Value -is [decimal]) { return $Value }
+    if ($Value -is [System.Management.Automation.PSCustomObject]) {
+        $dict = [ordered]@{}
+        foreach ($p in $Value.PSObject.Properties) { $dict[$p.Name] = $p.Value }
+        return Hide-StructuredValue -Value $dict -Seed $Seed -Key $Key
+    }
+    if ($Value -is [System.Collections.IDictionary]) {
+        $obj = [ordered]@{}
+        foreach ($k in $Value.Keys) {
+            $name = [string]$k
+            if ($name -match '(?i)^(id|record_id|open_id|user_id|union_id|app_id|table_id|field_id|file_token|token)$') {
+                $obj[$name] = Get-FakeStructuredId -Value ([string]$Value[$k]) -Seed ($Seed + '/' + $name)
+            }
+            else {
+                $obj[$name] = Hide-StructuredValue -Value $Value[$k] -Seed ($Seed + '/' + $name) -Key $name
+            }
+        }
+        return [pscustomobject]$obj
+    }
+    if ($Value -is [System.Collections.IEnumerable]) {
+        $list = [System.Collections.Generic.List[object]]::new()
+        $i = 0
+        foreach ($element in $Value) {
+            $list.Add((Hide-StructuredValue -Value $element -Seed ($Seed + '/' + $i) -Key $Key))
+            $i++
+        }
+        return ,$list.ToArray()
+    }
+    return Hide-FreeText -Text ([string]$Value)
+}
+
 function Hide-LinkCell {
     param($Cell, [int]$Ordinal)
-    $out = [System.Collections.Generic.List[object]]::new()
-    $i = 0
-    foreach ($element in @($Cell)) {
-        if ($null -eq $element) { $out.Add($null); $i++; continue }
-        $obj = [ordered]@{}
-        if ($element -is [System.Collections.IDictionary]) {
-            foreach ($k in $element.Keys) { $obj[[string]$k] = $element[$k] }
-        }
-        elseif ($element -is [System.Management.Automation.PSCustomObject]) {
-            foreach ($p in $element.PSObject.Properties) { $obj[$p.Name] = $p.Value }
-        }
-        if ($obj.Contains('id')) { $obj['id'] = Get-FakeRecordId -Ordinal (100 + $Ordinal * 10 + $i) }
-        if ($obj.Contains('text')) { $obj['text'] = Hide-FreeText -Text ([string]$obj['text']) }
-        if ($obj.Count -eq 0) { $out.Add((Hide-FreeText -Text ([string]$element))); $i++; continue }
-        $out.Add([pscustomobject]$obj)
-        $i++
-    }
-    return , $out.ToArray()
+    $sanitized = Hide-StructuredValue -Value $Cell -Seed ('link#' + $Ordinal)
+    return ,$sanitized
 }
 
 # 受控词表列：值本身是分类，不是项目数据 —— 原样保留（数组形状也保留）
@@ -187,12 +250,74 @@ $script:VocabularyColumns = @('难度', '分类', '授权边界', '审批状态'
 # 形状规则列：按原值形态换成同型虚构值（不是逐行文本替换），自检时单独按形态断言
 $script:ShapeColumns = @('项目名', '仓库路径', 'GitHub', 'codex_thread_id', '会话ID', '最近执行时间', '父记录')
 
+# 强受控词表：不在表内的选项直接让采集失败，避免把新加的自由文本选项带进样本。
+$script:VocabularyValues = @{
+    '难度' = @('入门', '简单', '中等', '困难', '专家')
+    '分类' = @('工作项目', '兴趣研究', '开源项目', '个人项目')
+    '授权边界' = @('只读', '自主')
+    '审批状态' = @('已通过', '待审', '阻塞', '已拒绝')
+    '优先级' = @('P0', 'P1', 'P2')
+    '协作形态' = @('sparse', 'approve', 'dense', 'none')
+    '动作类型' = @('repo-code', 'repo-test', 'repo-doc', 'field-ops', 'release', 'secret', 'config', 'decision', 'unclear')
+    '最近结果' = @('成功', '失败', '阻塞', '跳过', '进行中', '待开始')
+    '贡献类型' = @('功能增强', '文档完善', '研究探索', 'bug修复', '性能优化', '重构', '测试')
+    '当前阶段' = @('开发', '维护', '规划', '验证', '暂停', '归档', '进行中', '已完成', '已实现', '待开始', '完成(dry-run)', 'HUMAN_REVIEW pending')
+    '执行器' = @('mcode', 'codex', 'manual')
+}
+$script:VocabularyPattern = '^[\p{L}\p{N}()（）._\- ]{1,32}$'
+
+# 采样与行选择会按名索骥；缺列时不要继续生成一份错位样本。
+$script:RequiredColumns = @($script:VocabularyColumns + $script:ShapeColumns + @('巡检间隔(分钟)', '假数据模式')) | Sort-Object -Unique
+
+function Assert-VocabularyValue {
+    param([string]$Column, $Value)
+    $text = [string]$Value
+    if ($script:VocabularyValues.ContainsKey($Column)) {
+        if ($script:VocabularyValues[$Column] -notcontains $text) {
+            throw ('列 {0} 的值「{1}」不在受控词表内；请先把该选项加入 VocabularyValues 再重采' -f $Column, $text)
+        }
+        return $text
+    }
+    if ($text -notmatch $script:VocabularyPattern) {
+        throw ('列 {0} 的值「{1}」不像受控选项；拒绝写入样本' -f $Column, $text)
+    }
+    return $text
+}
+
+function Get-NormalizedFieldType {
+    param($Value)
+    $s = ([string]$Value).Trim()
+    if ($s -eq '1') { return 'text' }
+    if ($s -eq '2') { return 'number' }
+    if ($s -eq '3') { return 'select' }
+    if ($s -eq '4') { return 'multi_select' }
+    if ($s -eq '5') { return 'datetime' }
+    if ($s -eq '7') { return 'checkbox' }
+    if ($s -eq '11') { return 'user' }
+    if ($s -eq '13') { return 'phone' }
+    if ($s -eq '15') { return 'url' }
+    if ($s -eq '17') { return 'attachment' }
+    if ($s -eq '18') { return 'link' }
+    if ($s -eq '19') { return 'lookup' }
+    if ($s -eq '20') { return 'formula' }
+    if ($s -eq '21') { return 'duoshu' }
+    if ($s -eq '22') { return 'location' }
+    if ($s -eq '23') { return 'group_chat' }
+    if ($s -eq '1001') { return 'created_time' }
+    if ($s -eq '1002') { return 'modified_time' }
+    if ($s -eq '1003') { return 'created_user' }
+    if ($s -eq '1004') { return 'modified_user' }
+    if ($s -eq '1005') { return 'auto_number' }
+    return $s.ToLowerInvariant()
+}
+
 # 返回 @{ Value = <原始形状的脱敏值> }：用 hashtable 当容器，避开 PowerShell 把单元素数组
 # / 数组本身展平进管道的问题（否则 ["P1"] 会变成 "P1"，样本就不再是真实形状）。
 function Get-SanitizedCell {
     param([string]$Column, [string]$FieldType, $Value, [int]$Ordinal)
     if ($null -eq $Value) { return @{ Value = $null } }
     $seed = '{0}#{1}' -f $Column, $Ordinal
+    $type = Get-NormalizedFieldType -Value $FieldType
     $out = $null
     switch ($Column) {
         '项目名' { $out = ('示例项目-{0:D2}' -f ($Ordinal + 1)) }
@@ -200,26 +325,64 @@ function Get-SanitizedCell {
         'GitHub' { $out = (Hide-GitHub -Value ([string]$Value) -Ordinal $Ordinal) }
         'codex_thread_id' { $out = (Hide-Id -Value ([string]$Value) -Seed $seed) }
         '会话ID' { $out = (Hide-Id -Value ([string]$Value) -Seed $seed) }
-        '最近执行时间' { $out = (Hide-Timestamp -Value ([string]$Value) -Ordinal $Ordinal) }
+        '最近执行时间' { $out = (Hide-Timestamp -Value $Value -Ordinal $Ordinal) }
         '父记录' { $out = (Hide-LinkCell -Cell $Value -Ordinal $Ordinal) }
         default {
             if ($script:VocabularyColumns -contains $Column) {
-                # 词表列：逐个元素原样保留（数组就是数组，含单元素数组）
-                if ($Value -is [array]) { $out = @($Value) } else { $out = $Value }
+                if ($Value -is [array]) {
+                    $mapped = @(foreach ($el in $Value) {
+                            if ($null -eq $el) { $null }
+                            elseif ($el -is [string]) { Assert-VocabularyValue -Column $Column -Value $el }
+                            else { throw ('列 {0} 的 select 单元里有非字符串元素，拒绝写入样本' -f $Column) }
+                        })
+                    $out = $mapped
+                }
+                else { $out = Assert-VocabularyValue -Column $Column -Value $Value }
             }
-            elseif ($Value -is [array]) {
-                $mapped = @(foreach ($el in $Value) {
-                        if ($null -eq $el) { $null }
-                        elseif ($el -is [string]) { Hide-FreeText -Text $el }
-                        else { $el }
-                    })
-                $out = $mapped
+            elseif ($type -eq 'select' -or $type -eq 'multi_select') {
+                throw ('未知 select 列「{0}」：先加进 VocabularyColumns 与 VocabularyValues，再重采' -f $Column)
             }
-            elseif ($Value -is [bool] -or $Value -is [int] -or $Value -is [long] -or $Value -is [double] -or $Value -is [decimal]) { $out = $Value }
-            else { $out = (Hide-FreeText -Text ([string]$Value)) }
+            elseif ($type -eq 'checkbox') {
+                if ($Value -is [bool]) { $out = $Value } else { throw ('列 {0} 是 checkbox，但值不是布尔' -f $Column) }
+            }
+            elseif ($type -eq 'number' -or $type -eq 'auto_number') {
+                if ($Value -is [int] -or $Value -is [long] -or $Value -is [double] -or $Value -is [decimal]) { $out = $Value }
+                else { throw ('列 {0} 是数字列，但值不是数字' -f $Column) }
+            }
+            elseif ($type -eq 'datetime' -or $type -eq 'created_time' -or $type -eq 'modified_time') {
+                if ($Value -is [array]) { $out = @(foreach ($el in $Value) { Hide-Timestamp -Value $el -Ordinal $Ordinal }) }
+                else { $out = Hide-Timestamp -Value $Value -Ordinal $Ordinal }
+            }
+            elseif ($type -eq 'link') {
+                $out = Hide-LinkCell -Cell $Value -Ordinal $Ordinal
+            }
+            elseif ($type -eq 'text' -and $Value -is [string]) {
+                $out = Hide-FreeText -Text $Value
+            }
+            else {
+                # user / attachment / lookup / formula / unknown: never pass the element through.
+                $out = Hide-StructuredValue -Value $Value -Seed $seed
+            }
         }
     }
     return @{ Value = $out }
+}
+
+function Assert-TableShape {
+    param($Raw)
+    $fields = @($Raw.data.fields)
+    $fieldIds = @($Raw.data.field_id_list)
+    $fieldTypes = @($Raw.data.field_type_list)
+    $matrix = @($Raw.data.data)
+    $recordIds = @($Raw.data.record_id_list)
+    if ($fields.Count -ne $fieldIds.Count) { throw ('fields={0} 与 field_id_list={1} 数量不一致' -f $fields.Count, $fieldIds.Count) }
+    if ($fields.Count -ne $fieldTypes.Count) { throw ('fields={0} 与 field_type_list={1} 数量不一致' -f $fields.Count, $fieldTypes.Count) }
+    if ($matrix.Count -ne $recordIds.Count) { throw ('data={0} 行与 record_id_list={1} 数量不一致' -f $matrix.Count, $recordIds.Count) }
+    for ($i = 0; $i -lt $matrix.Count; $i++) {
+        if (@($matrix[$i]).Count -ne $fields.Count) { throw ('第 {0} 行有 {1} 个单元，fields 有 {2} 个；列错位时拒绝采样' -f $i, @($matrix[$i]).Count, $fields.Count) }
+    }
+    $missing = @($script:RequiredColumns | Where-Object { $fields -notcontains [string]$_ })
+    if ($missing.Count -gt 0) { throw ('方向表缺少必需列：{0}' -f ($missing -join ', ')) }
 }
 
 # ---------------------------------------------------------------------------
@@ -261,6 +424,32 @@ function Select-GoldenRows {
 # ---------------------------------------------------------------------------
 # 自检：样本里不得留下原始标识符 / 原始文本 / 常见泄漏面
 # ---------------------------------------------------------------------------
+function Get-StringLeaves {
+    param($Value)
+    $out = [System.Collections.Generic.List[string]]::new()
+    if ($null -eq $Value) { return ,$out.ToArray() }
+    if ($Value -is [string]) { $out.Add($Value); return ,$out.ToArray() }
+    if ($Value -is [System.Management.Automation.PSCustomObject]) {
+        foreach ($p in $Value.PSObject.Properties) {
+            foreach ($s in (Get-StringLeaves -Value $p.Value)) { $out.Add($s) }
+        }
+        return ,$out.ToArray()
+    }
+    if ($Value -is [System.Collections.IDictionary]) {
+        foreach ($k in $Value.Keys) {
+            foreach ($s in (Get-StringLeaves -Value $Value[$k])) { $out.Add($s) }
+        }
+        return ,$out.ToArray()
+    }
+    if ($Value -is [System.Collections.IEnumerable]) {
+        foreach ($element in $Value) {
+            foreach ($s in (Get-StringLeaves -Value $element)) { $out.Add($s) }
+        }
+        return ,$out.ToArray()
+    }
+    return ,$out.ToArray()
+}
+
 function Get-ForbiddenFragments {
     param($Raw, [string[]]$Fields)
     $frags = [System.Collections.Generic.HashSet[string]]::new()
@@ -268,26 +457,34 @@ function Get-ForbiddenFragments {
     foreach ($id in @($Raw.data.field_id_list)) { if ($id) { [void]$frags.Add([string]$id) } }
     for ($j = 0; $j -lt $Fields.Count; $j++) {
         $column = [string]$Fields[$j]
+        # Vocabulary values are checked against an allowlist above; they are the one class of
+        # strings that intentionally survive. Every other raw string is checked, including the
+        # values of user / attachment / lookup / formula objects.
         if ($script:VocabularyColumns -contains $column) { continue }
-        # 形状规则列的产物是完整替换（路径 / URL / UUID / 时间串），不参与「原文片段」比对，
-        # 否则 ‘https://’ 这种结构性前缀会假命中；它们由 Assert-SampleSanitized 的形态断言管。
-        if ($script:ShapeColumns -contains $column) { continue }
         foreach ($row in @($Raw.data.data)) {
-            $v = $row[$j]
-            if ($null -eq $v) { continue }
-            $text = if ($v -is [array]) { (@($v | ForEach-Object { if ($null -ne $_) { [string]$_ } }) -join "`n") } else { [string]$v }
-            if ($text.Length -lt 4) { continue }
-            # 每段取若干 8 字符窗口：够短，能抓「样本里还剩半句原文」。
-            # 纯数字/标点片段不算（1440 这类数字本来就保留在巡检间隔等列里）。
-            $start = 0
-            while ($start -lt $text.Length) {
-                $len = [Math]::Min(8, $text.Length - $start)
-                if ($len -ge 4) {
-                    $frag = $text.Substring($start, $len)
-                    if ($frag -notmatch '^[0-9\s:.,，。()（）\-—/+]+$' -and $frag -notmatch '^https?://?$') { [void]$frags.Add($frag) }
+            foreach ($text in (Get-StringLeaves -Value $row[$j])) {
+                if ($text.Length -lt 4) { continue }
+                # Keep a whole short value (a secret can be six characters), but only take
+                # sliding windows for long values. Four-character windows collide with fake
+                # tokens such as file_ / user@ and make the check noisy instead of strict.
+                if ($text.Length -ge 6 -and $text -notmatch '^[0-9\s:.,，。()（）\-—/+]+$') { [void]$frags.Add($text) }
+                if ($text.Length -lt 8) { continue }
+                # Windows are only meaningful for prose. Pure tokens (emails, URLs, file
+                # handles, ids) are short and share prefixes by design; windowing them
+                # matches the fake namespace (user@example.invalid, file_) and turns a
+                # strict check into a noisy one. Whole-value comparison already catches
+                # a leaked token, so skip the windows for anything without prose.
+                if ($text -notmatch '\s' -and $text -notmatch '[\u4e00-\u9fff]') { continue }
+                $start = 0
+                while ($start -lt $text.Length) {
+                    $len = [Math]::Min(8, $text.Length - $start)
+                    if ($len -ge 4) {
+                        $frag = $text.Substring($start, $len)
+                        if ($frag -notmatch '^[0-9\s:.,，。()（）\-—/+]+$' -and $frag -notmatch '^https?://?$') { [void]$frags.Add($frag) }
+                    }
+                    if ($start + 8 -ge $text.Length) { break }
+                    $start += [Math]::Max(1, [int][Math]::Floor(($text.Length - 8) / 4))
                 }
-                if ($start + 8 -ge $text.Length) { break }
-                $start += [Math]::Max(1, [int][Math]::Floor(($text.Length - 8) / 4))
             }
         }
     }
@@ -303,13 +500,15 @@ function Assert-SampleSanitized {
         if ($frag.Length -lt 4) { continue }
         if ($json.IndexOf($frag, [System.StringComparison]::Ordinal) -ge 0) {
             $problems.Add(('残留原始片段（长度 {0}，前 2 字：{1}…）' -f $frag.Length, $frag.Substring(0, [Math]::Min(2, $frag.Length))))
-            break
+            if ($problems.Count -ge 8) { break }
         }
     }
     foreach ($literal in @('github.com', 'gitee.com', 'gitAll', 'sobey', 'soboy', 'http://')) {
         if ($json.IndexOf($literal, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) { $problems.Add("命中禁用子串：$literal") }
     }
-    if ($json -match '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}') { $problems.Add('命中邮件地址形态') }
+    foreach ($m in [regex]::Matches($json, '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}')) {
+        if ($m.Value -notmatch '@example\.invalid$') { $problems.Add('命中非虚构邮件地址形态'); break }
+    }
     foreach ($m in [regex]::Matches($json, 'https?://[^"\s\\]+')) {
         if ($m.Value -notmatch '^https://example\.invalid/') { $problems.Add('出现非 example.invalid 的 URL') ; break }
     }
@@ -326,7 +525,7 @@ function Assert-SampleSanitized {
         'GitHub'       = '^(https://example\.invalid/example-org/project-\d{2}|example-org/project-\d{2})$'
         'codex_thread_id' = '^00000000-0000-4000-8000-[0-9a-z]{12}$|^(?:[A-Za-z]{2,6}_)?[0-9a-z]{8,}$'
         '会话ID'       = '^00000000-0000-4000-8000-[0-9a-z]{12}$|^(?:[A-Za-z]{2,6}_)?[0-9a-z]{8,}$'
-        '最近执行时间' = '^2026-01-\d{2}T09:\d{2}:00\.000(\+08:00|Z)$'
+        '最近执行时间' = '^2026-01-\d{2}T09:\d{2}:00\.000(\+08:00|Z)$|^\d{10,13}$'
     }
     $fieldsForShape = @($Sample.data.fields)
     for ($j = 0; $j -lt $fieldsForShape.Count; $j++) {
@@ -336,20 +535,23 @@ function Assert-SampleSanitized {
             $v = $row[$j]
             if ($null -eq $v) { continue }
             if ([string]$v -notmatch $allowed[$column]) {
-                $problems.Add(('列 {0} 的脱敏值不在允许形态内' -f $column))
+                $problems.Add(('列 {0} 的脱敏值「{1}」不在允许形态内' -f $column, [string]$v))
                 break
             }
         }
     }
 
-    # text 列不得有超长单元格（脱敏后单行上限 64）
+    # Every string leaf, including strings inside user/attachment/lookup objects, must respect
+    # the same line limit. This is the check that catches an object passed through untouched.
     $fields = @($Sample.data.fields)
     for ($j = 0; $j -lt $fields.Count; $j++) {
         foreach ($row in @($Sample.data.data)) {
-            $v = $row[$j]
-            if ($v -is [string]) {
-                foreach ($line in [regex]::Split($v, "(`r`n|`n|`r)")) {
-                    if ($line.Length -gt 64) { $problems.Add(('列 {0} 有超过 64 字符的单元格（{1} 字符）' -f $fields[$j], $line.Length)); break }
+            foreach ($text in (Get-StringLeaves -Value $row[$j])) {
+                foreach ($line in [regex]::Split($text, "(`r`n|`n|`r)")) {
+                    if ($line.Length -gt $script:TextLimit) {
+                        $problems.Add(('列 {0} 有超过上限 {1} 的字符串（{2} 字符）' -f $fields[$j], $script:TextLimit, $line.Length))
+                        break
+                    }
                 }
             }
         }
@@ -362,7 +564,7 @@ function Assert-SampleSanitized {
 # ---------------------------------------------------------------------------
 if ($CheckOnly) {
     if (-not (Test-Path -LiteralPath $Out)) { throw "CheckOnly: 样本不存在：$Out" }
-    $sample = [System.IO.File]::ReadAllText($Out, $script:Utf8NoBom) | ConvertFrom-Json -AsHashtable
+    $sample = [System.IO.File]::ReadAllText($Out, $script:Utf8NoBom) | ConvertFrom-Json -AsHashtable -DateKind String
     # 无原始表可比时只做「形态 + 禁用子串」自检：把 raw 置成同形状的空壳
     $shim = @{ data = @{ record_id_list = @(); field_id_list = @(); data = @(); fields = @($sample.data.fields) } }
     $problems = Assert-SampleSanitized -Sample $sample -Raw $shim -Fields @($sample.data.fields)
@@ -375,28 +577,40 @@ if ($CheckOnly) {
     exit 0
 }
 
-if ([string]::IsNullOrWhiteSpace($BaseToken)) {
-    throw @'
+if ($RawJson) {
+    if (-not (Test-Path -LiteralPath $RawJson)) { throw "RawJson 不存在：$RawJson" }
+    $rawText = [System.IO.File]::ReadAllText($RawJson, $script:Utf8NoBom)
+    Write-Host ("offline input: {0}" -f $RawJson)
+}
+else {
+    if ([string]::IsNullOrWhiteSpace($BaseToken)) {
+        throw @'
 缺 base token：-BaseToken 或环境变量 PATROL_BITABLE_BASE_TOKEN 都没有。
 本脚本不内置任何凭据，也不伪造样本。取到 token 后重跑：
   $env:PATROL_BITABLE_BASE_TOKEN = '<token>'
   pwsh -NoProfile -File tests/record-bitable-golden.ps1
 '@
-}
-if (-not (Get-Command -Name $LarkCli -ErrorAction SilentlyContinue)) {
-    throw "找不到 lark-cli（$LarkCli）：装好或 -LarkCli 指路。采集失败不写样本。"
+    }
+    if (-not (Get-Command -Name $LarkCli -ErrorAction SilentlyContinue)) {
+        throw "找不到 lark-cli（$LarkCli）：装好或 -LarkCli 指路。采集失败不写样本。"
+    }
+
+    $cliArgs = @('base', '+record-list', '--base-token', $BaseToken, '--table-id', $TableId, '--limit', '200', '--format', 'json', '--as', $Identity)
+    Write-Host ("collect: lark-cli base +record-list --table-id {0} --limit 200 --format json --as {1}" -f $TableId, $Identity)
+    $rawText = (& $LarkCli @cliArgs 2>&1 | Out-String)
+    $exit = $LASTEXITCODE
+    if ($exit -ne 0) {
+        # 只报退出码与首行类别，不回显可能含凭据的命令行
+        throw ("lark-cli 取数失败（exit={0}）。首行：{1}" -f $exit, (($rawText -split "`r?`n")[0]))
+    }
 }
 
-$cliArgs = @('base', '+record-list', '--base-token', $BaseToken, '--table-id', $TableId, '--limit', '200', '--format', 'json', '--as', $Identity)
-Write-Host ("collect: lark-cli base +record-list --table-id {0} --limit 200 --format json --as {1}" -f $TableId, $Identity)
-$rawText = (& $LarkCli @cliArgs 2>&1 | Out-String)
-$exit = $LASTEXITCODE
-if ($exit -ne 0) {
-    # 只报退出码与首行类别，不回显可能含凭据的命令行
-    throw ("lark-cli 取数失败（exit={0}）。首行：{1}" -f $exit, (($rawText -split "`r?`n")[0]))
-}
 $raw = $rawText | ConvertFrom-Json -AsHashtable -Depth 30 -DateKind String
-if ($raw.ok -ne $true) { throw ('lark-cli 返回 ok!=true：' + (($rawText -split "`r?`n")[0])) }
+if ($raw.ok -ne $true) { throw ('record-list 返回 ok!=true：' + (($rawText -split "`r?`n")[0])) }
+Assert-TableShape -Raw $raw
+if ($raw.data.has_more -eq $true -or [string]$raw.data.has_more -eq 'true') {
+    throw 'record-list 返回 has_more=true：当前只取 200 行，样本会被截断；先分页取全表再采。'
+}
 
 $fields = @($raw.data.fields)
 $matrix = @($raw.data.data)
@@ -405,11 +619,19 @@ $fieldTypes = @($raw.data.field_type_list)
 Write-Host ("raw: {0} 行 x {1} 列（rev={2}，has_more={3}）" -f $matrix.Count, $fields.Count, $raw.data.rev, $raw.data.has_more)
 
 $selection = Select-GoldenRows -Fields $fields -Matrix $matrix
+if (@($selection.Indexes).Count -eq 0) { throw '特征清单没有命中任何行；空样本不写。' }
 Write-Host ('selected rows: {0}' -f (@($selection.Indexes) -join ','))
 foreach ($i in $selection.Indexes) { Write-Host ('     row {0} <- {1}' -f $i, $selection.Why[$i]) }
 
 $typeOf = @{}
-for ($j = 0; $j -lt $fields.Count; $j++) { $typeOf[[string]$fields[$j]] = if ($j -lt $fieldTypes.Count) { [string]$fieldTypes[$j] } else { '' } }
+for ($j = 0; $j -lt $fields.Count; $j++) { $typeOf[[string]$fields[$j]] = Get-NormalizedFieldType -Value $fieldTypes[$j] }
+
+# Link ids that point at a selected row reuse that row's fake id, so the sample is self-consistent.
+$script:RecordIdMap.Clear()
+for ($o = 0; $o -lt @($selection.Indexes).Count; $o++) {
+    $sourceIndex = $selection.Indexes[$o]
+    $script:RecordIdMap[[string]$recordIds[$sourceIndex]] = Get-FakeRecordId -Ordinal $o
+}
 
 $newRows = [System.Collections.Generic.List[object]]::new()
 $newIds = [System.Collections.Generic.List[string]]::new()
@@ -418,7 +640,10 @@ for ($o = 0; $o -lt @($selection.Indexes).Count; $o++) {
     $cells = [System.Collections.Generic.List[object]]::new()
     for ($j = 0; $j -lt $fields.Count; $j++) {
         $column = [string]$fields[$j]
-        $value = if ($j -lt $src.Count) { $src[$j] } else { $null }
+        # 从 if 语句取值会把单元素数组解包（语句输出进管线会被枚举），
+        # 于是 user / 附件 / link 的数组形状就没了。这里用赋值语句，形状保留。
+        $value = $null
+        if ($j -lt $src.Count) { $value = $src[$j] }
         $cells.Add((Get-SanitizedCell -Column $column -FieldType $typeOf[$column] -Value $value -Ordinal $o).Value)
     }
     $newRows.Add([object[]]$cells.ToArray())
