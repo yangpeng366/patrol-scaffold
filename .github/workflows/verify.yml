@@ -116,3 +116,9 @@ jobs:
         shell: pwsh
         run: pwsh -NoProfile -File tests/verify-no-secrets.ps1
 
+      # 提示词决策层的离线自测：提示词本体 + 解析器 + 三类回答（合规 / 缺字段 / 多行杂音）。
+      # 不联网、不调模型、不读凭据，所以这条在 CI 上是真跑而不是 SKIP。
+      - name: Decision prompt self-test
+        shell: pwsh
+        run: pwsh -NoProfile -File tests/verify-decision-prompt.ps1
+

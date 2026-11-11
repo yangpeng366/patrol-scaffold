@@ -167,6 +167,7 @@ to parse. Judge reds by pwsh 7 only.
 - `references/adapter-spec.md` - fill-in-the-blank template for adding a data source (11 sections) + test checklist.
 - `references/patrol-blueprint.md` - full architecture, real params, two concretizations (Feishu live / 腾讯文档 swap-in), "apply to other needs" 13-step checklist, anti-patterns.
 - `schemas/item.schema.json` - item contract (single source of truth).
+- `prompts/decide-next-action.md` + `scripts/decide-next-action.ps1` - 模型决策层（只判「下一步做什么」，调度/解析仍归代码）：worker 拿到 item 行后，把「项目 / 目标 / 下一步 / 最近结果 / 上次成果」填进提示词贴给任意 LLM，固定三行回答（`动作` / `理由` / `人工介入`）交给 `pwsh -File scripts/decide-next-action.ps1 -InputFile <回答> -OutputFile <json>`（省略 `-OutputFile` 写 `%TEMP%`）解析成 JSON；脚本只喂输入/解析输出/落盘，不做业务判断，缺字段或重复字段直接报错退出码 2 而不是猜，可复用做法用 `沉淀: - <做法> — <命令>` 一行追加。离线自测：`pwsh -File tests/verify-decision-prompt.ps1`。
 - `adapters/*.adapter.json` - declarative provider descriptors.
 - `adapters/command.adapter.json` + `scripts/command-adapter.ps1` - provider=command：一次命令调用输出 JSON 的源（SCNet / 任意 CLI / 数据库导出）。子进程执行、超时杀进程树、退出码透传、信封 itemsPath / 字段名 fieldMap 可配；零凭据，mock 命令随仓分发（`tests/fixtures/command/`）所以 CI 可真跑。
 - `docs/adapting-a-provider.md` - 加一个数据源要动多少东西：command 适配的实测账（核心 0 行）、8 步清单、常见坑、何时只加 adapter / 何时动核心、**§8 当前 provider 支持边界与 SKIP 恢复条件**。

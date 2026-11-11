@@ -17,6 +17,7 @@
     "fake": { "type": "boolean" },
     "lastRun": { "type": ["string", "null"], "description": "ISO 时间串；空视为到期" },
     "currentStage": { "type": "string" },
-    "achievement": { "type": "string" }
+    "achievement": { "type": "string" },
+    "actionType": { "type": "string", "description": "动作类型：九种规范取值之一（repo-code / repo-test / repo-doc / field-ops / release / secret / config / decision / unclear）。词表事实源是 dsh-patrol 的 action-vocabulary.ts，这里只作说明，不写 enum，以免变成第二份词表" }
   }
 }
