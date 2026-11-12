@@ -1,5 +1,8 @@
 # patrol-scaffold
 
+[![Release](https://img.shields.io/github/v/release/yangpeng366/patrol-scaffold.svg)](https://github.com/yangpeng366/patrol-scaffold/releases/latest)
+[![CI](https://img.shields.io/github/actions/workflow/status/yangpeng366/patrol-scaffold/verify.yml?branch=main)](https://github.com/yangpeng366/patrol-scaffold/actions/workflows/verify.yml)
+
 可复用、供应商无关的「定时巡检」自动化脚手架（Codex skill）。
 
 **版本：0.2.0**（2026-11-11）| 变更见 [`CHANGELOG.md`](CHANGELOG.md) | 发布 / 打包 / 安装升级见

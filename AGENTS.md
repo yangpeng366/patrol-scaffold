@@ -110,3 +110,69 @@ pwsh -NoProfile -File tests/verify-item-parity-e2e.ps1          # 跨仓动态�
 ```
 
 **面向 agent 的接入入口**：`docs/adapting-a-provider.md` §0.1「面向 Agent 的接入」列出下游 agent 需要知道的全部接口（描述文件 11 键 + 模块三函数 + 跑法 + 离线自测 + 判断下一步做什么的提示词）；速查在 README 的「其他 Agent 快速上手（先跑通命令行再谈架构）」。新增 provider 的逐步操作看 `references/adding-a-provider.md`，业务判断填表看 `references/adapter-spec.md`。
+
+## 7. 实践与调试
+
+下面每条都是实测踩过的坑：只写「症状 → 原因 → 对策」，不写「应该怎样」。
+
+### 7.1 形状与脱敏（bitable 黄金样本）
+
+**症状**：user / 附件 / link 单元格的数组形状丢失，JSON 里变成裸对象。
+**原因**：`$v = if (...) { $src[$j] }` 从 `if` 语句取值 —— 语句输出进管线会被枚举，单元素数组被解包。
+**对策**：改成赋值语句取值（`$value = $null; if (...) { $value = $src[$j] }`），形状跟着值一起留下。复现见 `tests/record-bitable-golden.ps1` 里逐列取格的循环。
+
+**症状**：明明泄漏了，自检却判绿。
+**原因**：在整份 JSON 文本上找片段 —— 含 `\` 的 Windows 路径与分段叙述已被 JSON 转义，永远匹配不到。
+**对策**：在反序列化后的「单元格值」上比对（`Get-SampleValueLeaves`），再叠一层正向白名单（`Assert-FakeCellShape`）；黑名单只挡已知泄漏，白名单才是兜底。复现：`pwsh -NoProfile -File tests/verify-bitable-golden-sanitizer.ps1`（反向用例会故意把某格换回真实形态，期望 `-CheckOnly` 判红）。
+
+**症状**：公式金额、附件大小、位置坐标原样透传也不报错。
+**原因**：数字不参与字符串比对，`Get-StringLeaves` 只收字符串叶子，数字叶子连自检都看不见。
+**对策**：结构化单元里的数字要同型同位替换（`Hide-StructuredNumber`：位数照原值算，int/long/decimal/double 各回各型），别把数字转成字符串再脱敏。
+
+### 7.2 语义与判定
+
+**症状**：把「间隔=[0,5]」的行当成停跑行选进样本。
+**原因**：PowerShell 的 `-eq` 对数组是筛选语义 —— `[0,5] -eq 0` 得 `@(0)` 且为真。
+**对策**：只认标量数值 0：先否掉数组，再判是不是数值类型，最后才比 `-eq 0`。复现见 `tests/record-bitable-golden.ps1` 中 `Select-GoldenRows` 的 `interval-zero` 判据。
+
+**症状**：同一份样本重跑 due=0。
+**原因**：不是 bug。`state/patrol-state.json` 会把 lastRun 合并回来，间隔没到自然不 due。
+**对策**：要干净的「首轮全到期」信号，把 `-StateFile` 指到临时路径。复现：`pwsh -NoProfile -File scripts/patrol-loop.ps1 -TasksFile scripts/sample-tasks.json -StateFile (Join-Path $env:TEMP 'patrol-state.json') -Once -DryRun`
+
+停跑语义（`scripts/patrol-schedule.ps1`）：intervalMin 为 0 / 空 / 缺列 / 负数 = 停跑；intervalMin > 0 但 lastRun 未到 = 未到期，不是停跑。
+
+### 7.3 门禁与环境
+
+**症状**：`scripts/build-release.ps1` 直接 FAIL 并列出未跟踪文件。
+**原因**：发布门禁 fail-closed —— 仓里出现未跟踪且未被忽略的文件即拒绝打包。
+**对策**：确属本次发布内容就显式加 `-IncludeUntracked`；不是就加进 `.gitignore` 或删掉。复现：`pwsh -NoProfile -File scripts/build-release.ps1`
+
+**症状**：在 Windows PowerShell 5.1 下脚本解析失败、门禁判红。
+**原因**：5.1 按系统 ANSI 解码无 BOM 文件，中文串把语法带崩。
+**对策**：判红只认 pwsh 7；也别为迁就 5.1 给仓内脚本加 BOM（会破坏无 BOM 约定）。
+
+**症状**：本机业务扩展（`jev-shadow-hooks/`、`scripts/JevShadow*.ps1`、`tests/verify-jev-*.ps1`）的测试要真 Typesafe key 才跑。
+**原因**：这批是 gitignored 的本机扩展，不属脚手架；默认配置的 `api_script_path` 指向真实 Typesafe API。
+**对策**：离线改用 `jev-shadow-hooks\fake-jev.ps1`（配置里 `enabled` + `api_script_path` 指过去）；真实 key 那条用显式开关控制实跑 —— `PATROL_JEV_LIVE=1` 才开闸，缺 key 就记 SKIP 而不是硬失败。复现：`pwsh -NoProfile -File tests/verify-item-jev-decision.ps1`（离线 pass=11 fail=0 skip=1）
+
+### 7.4 本地自测怎么跑
+
+零凭据、零网络，文件名以 `tests/` 下实际存在的为准：
+
+```powershell
+pwsh -NoProfile -File scripts/adapter-contract-test.ps1          # 契约自测 pass=3 skip=2 fail=0
+pwsh -NoProfile -File tests/verify-adapter-spec.ps1             # 描述文件漂移
+pwsh -NoProfile -File tests/verify-disabled-scheduling.ps1      # 停跑语义
+pwsh -NoProfile -File tests/verify-decision-prompt.ps1          # 提示词决策层 pass=27 fail=0
+pwsh -NoProfile -File tests/verify-bitable-golden-sanitizer.ps1 # 黄金样本脱敏
+pwsh -NoProfile -File tests/verify-state-externalization.ps1    # 运行态外置、源只读
+pwsh -NoProfile -File tests/verify-provider-isolation.ps1      # 同名函数不串味 pass=12 fail=0
+pwsh -NoProfile -File tests/verify-csv-file-adapter.ps1        # csv-file pass=43 fail=0
+pwsh -NoProfile -File tests/verify-command-adapter.ps1          # command pass=45 fail=0
+pwsh -NoProfile -File tests/verify-tencent-docs-adapter.ps1     # 腾讯文档 mock pass=17 fail=0
+pwsh -NoProfile -File tests/verify-no-secrets.ps1               # 密钥卫生 pass=12 fail=0
+pwsh -NoProfile -File tests/verify-secret-history.ps1           # git 历史里的密钥 hits=0
+pwsh -NoProfile -File tests/verify-install-drift.ps1            # 安装漂移（含坏样本自证）
+```
+
+跨仓那两道要兄弟仓 `dsh-patrol` 检出后才真跑，否则是 SKIP（不等于检查过了）：`tests/verify-item-contract-parity.ps1`、`tests/verify-item-parity-e2e.ps1`（后者还要 Node ≥ 22.6）。中文断言的两条先 `chcp 65001`（见 §4）。
