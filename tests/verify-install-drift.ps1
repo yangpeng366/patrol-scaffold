@@ -22,7 +22,10 @@
     其中一份故意模仿 `scripts/sample-tasks.json`），再逐场景复制安装目录，断言「干净副本 PASS /
     篡改一个字节 FAIL 并点名 / 缺文件 FAIL 并点名 / 运行态多余文件不误报且不被删除 /
     多余源码文件 FAIL / BOM 能报出 / 工作区脏但安装等于 HEAD 仍 PASS（证明以 HEAD 为准）/
-    不可读文件 FAIL 且句柄释放后恢复 PASS / `-ManifestFile` 只查清单内」。临时目录 finally 删除。
+    不可读文件 FAIL 且句柄释放后恢复 PASS / `-ManifestFile` 只查清单内 / `-ExcludePath` 生效 /
+    换行符差异点明」。末尾把自证仓再往前推两个提交，专测两类版本迁移事故：
+    「另一处 codex-home 的旧版完整副本落后一个提交、缺新文件 -> 点名该新文件」与
+    「升级后新旧两版并存、留有已改名的旧受控脚本 -> 点名多出的旧文件」。临时目录 finally 删除。
 
     用法：
       # 1) 只跑自证（CI / 无本机安装时）
@@ -507,6 +510,48 @@ function Invoke-DriftSelfTest {
     $r = Invoke-InstallDriftCheck -RepoRoot $repo -InstalledPath $crlf -Quiet
     $eol = @($r.Findings | Where-Object { $_.Kind -eq 'content' -and $_.Path -eq 'SKILL.md' -and $_.Detail -match '换行符' })
     Assert-DriftSelfTest 'k) CRLF/LF 差异 FAIL 且 detail 点明换行符' ((-not $r.Ok) -and $eol.Count -eq 1) (Get-FindingDetail $r)
+
+    # l/m) 版本迁移事故：现有 (d)/(e) 已在「单提交、篡改副本」口径下覆盖 missing / extra 判定，
+    #      这两条补的是此前没建模的事故形态 —— 自证仓再往前推提交，HEAD 领先于已安装副本。
+    #      不复用 (d)「删一个基线文件」/ (e)「加一个从没受控的 rogue」的构造，避免重复断言。
+
+    # 另一处 codex-home 的已安装副本：停在基线提交，是完整的旧版，不是被删过文件的残缺副本。
+    $otherHome = Join-Path $Root 'other-home\skills\patrol-scaffold'
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $otherHome) | Out-Null
+    Copy-Item -LiteralPath $repo -Destination $otherHome -Recurse -Force
+    $otherGit = Join-Path $otherHome '.git'
+    if (Test-Path -LiteralPath $otherGit) { Remove-Item -LiteralPath $otherGit -Recurse -Force }
+
+    function Add-SelftestCommit {
+        param([string]$Message)
+        & git -C $repo -c core.autocrlf=false add -A 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "自证用 git add 失败（$Message）" }
+        & git -C $repo -c core.autocrlf=false -c user.name='install-drift-selftest' -c user.email='selftest@example.invalid' commit -q -m $Message 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "自证用 git commit 失败（$Message）" }
+    }
+
+    # 提交 2：只新增一个受控文件 —— 旧版副本落后一个提交，缺的正是这个新文件。
+    [System.IO.File]::WriteAllText((Join-Path $repo 'scripts\new-worker.ps1'), "Write-Output 'new worker'`n", $script:Utf8NoBom)
+    Add-SelftestCommit 'selftest: add new-worker.ps1'
+
+    # l) 已安装 skill 指向另一处 codex-home 的旧版副本：必须 FAIL 且点名缺失的新文件
+    $r = Invoke-InstallDriftCheck -RepoRoot $repo -InstalledPath $otherHome -Quiet
+    $hit = @($r.Findings | Where-Object { $_.Kind -eq 'missing' -and $_.Path -eq 'scripts/new-worker.ps1' })
+    Assert-DriftSelfTest 'l) 落后一个提交的旧版副本 FAIL 且点名缺失新文件' ((-not $r.Ok) -and $hit.Count -eq 1 -and $r.Findings.Count -eq 1) (Get-FindingDetail $r)
+
+    # 提交 3：把一个受控脚本改名（旧名从 HEAD 消失、新名进 HEAD），模拟升级时的改名。
+    $oldScript = Join-Path $repo 'scripts\patrol-loop.ps1'
+    $oldScriptBytes = [System.IO.File]::ReadAllBytes($oldScript)
+    [System.IO.File]::WriteAllBytes((Join-Path $repo 'scripts\patrol-loop-v2.ps1'), $oldScriptBytes)
+    Remove-Item -LiteralPath $oldScript -Force
+    Add-SelftestCommit 'selftest: rename patrol-loop.ps1 to patrol-loop-v2.ps1'
+
+    # m) 新旧两版并存：安装目录 = 新版全套 + 上一版已改名的受控脚本（旧名残留）
+    $coexist = New-InstallCopy 'm-coexist'
+    [System.IO.File]::WriteAllBytes((Join-Path $coexist 'scripts\patrol-loop.ps1'), $oldScriptBytes)
+    $r = Invoke-InstallDriftCheck -RepoRoot $repo -InstalledPath $coexist -Quiet
+    $hit = @($r.Findings | Where-Object { $_.Kind -eq 'extra' -and $_.Path -eq 'scripts/patrol-loop.ps1' })
+    Assert-DriftSelfTest 'm) 新旧两版并存 FAIL 且点名多出的旧受控文件' ((-not $r.Ok) -and $hit.Count -eq 1 -and $r.Findings.Count -eq 1) (Get-FindingDetail $r)
 
     return [pscustomobject]@{ Pass = $script:SelfPass; Fail = $script:SelfFail }
 }
