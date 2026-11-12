@@ -1,6 +1,7 @@
 name: verify
 
-# 门槛只做九件事：描述文件规格漂移、契约自测（每个 provider 过同一把尺子）、停跑调度语义（intervalMin
+# 门槛只做十件事：描述文件规格漂移、契约自测（每个 provider 过同一把尺子）、bitable 只读实跑闸门
+# （默认不带 -Live：只跑分页/退出码离线自测，真读打印 SKIP，缺凭据不判红）、停跑调度语义（intervalMin
 # 为 0 / 空 / 负数不进 due，防止已停项目被每 60 分钟唤醒）、csv-file 离线自测、
 # command 离线自测（mock 命令，无凭据无网络，CI 可真跑）、跨仓 item 契约同源校验（兄弟仓 dsh-patrol
 # 稀疏 checkout 后真跑，不再是 SKIP）、安装漂移自检的自证段、密钥卫生、发布归档自证（内容清单 /
@@ -40,6 +41,12 @@ jobs:
       - name: Adapter contract test (all providers)
         shell: pwsh
         run: pwsh -NoProfile -File scripts/adapter-contract-test.ps1
+
+      # 可选实跑闸门：默认无 -Live 且无凭据，只跑分页/非零退出的离线自测并打印 SKIP，exit 0。
+      # CI 不装 lark-cli、不配飞书 secret，也绝不因为缺凭据判红；真读由本机人工 -Live 触发。
+      - name: bitable live gate (default SKIP without credentials)
+        shell: pwsh
+        run: pwsh -NoProfile -File tests/verify-bitable-live.ps1
 
       # 停跑语义闸门：intervalMin 为 0 / 空 / 缺列 / 负数一律不进 due（表数据里 0 值行 = 停跑）。
       # 自带 3 个变异副本自证：把「跳过」逻辑改回 <=0 -> 60 必须判红，否则说明闸门自己失效了。

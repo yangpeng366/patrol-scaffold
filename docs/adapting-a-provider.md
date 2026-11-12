@@ -275,7 +275,7 @@ pwsh -NoProfile -File tests/verify-<name>-adapter.ps1          # fail=0
 | `csv-file` | **PASS**（3 行） | 同上 + 列映射 / 引号逗号换行 / 写回字节保真 | 无 | `verify-csv-file-adapter.ps1` 43 条断言 |
 | `local-json` | **PASS** | 装配 → 读 JSON → 归一 → schema | 无 | dry-run + `verify-provider-isolation.ps1` |
 | `tencent-docs` | **SKIP** | 描述文件 / 模块 / 3 个函数存在 / 装配 | 真实鉴权、真实分页边界、列标题与视图名 | `verify-tencent-docs-adapter.ps1`：本地 mock HTTP 覆盖 2 页读取、归档行过滤、字段映射、epoch→ISO、镜像写回（14 条） |
-| `bitable` | **SKIP** | 同上 | 真实 `lark-cli` 调用、字段名映射、分页 | **无**（`tests/verify-bitable-adapter.ps1` 是本地业务扩展，`.gitignore` 已排除，不随包分发） |
+| `bitable` | **SKIP** | 同上 | 真实写回（本轮只读）；字段长期漂移监控 | `tests/verify-bitable-live.ps1`：默认跑分页/非零退出自测并 SKIP 真读；`-Live` 真读方向表 78 行、验字段名与逐行 `Convert-BitableRowToItem` 归一。`tests/verify-bitable-adapter.ps1` 是本地业务扩展，`.gitignore` 已排除，不随包分发 |
 
 ### 8.2 SKIP 到底跳过了什么
 
@@ -315,8 +315,9 @@ pwsh -NoProfile -File scripts/adapter-contract-test.ps1 -Provider bitable
    新增凭据实跑，验的是环境不是发布内容。
 2. **凭据不能进仓 / 不能进 CI**：密钥卫生是硬门禁（`verify-no-secrets.ps1`），为一次验收引入仓库
    secret 等于用发布流程破坏自己刚立的安全约束。
-3. **收益可被离线手段替代**：`tencent-docs` 的真实代码路径已有 mock 服务覆盖；`bitable` 的缺口是
-   「无离线 harness」，属已知技术债（已记在 `CHANGELOG.md` Known limits），与本版发布无关。
+3. **收益可被离线手段替代**：`tencent-docs` 的真实代码路径已有 mock 服务覆盖；`bitable` 的读侧也已有
+   离线 harness（`tests/verify-bitable-live.ps1` 默认路径：分页边界 + `lark-cli` 非零退出 6 条断言，
+   live 段默认 SKIP），剩下的是**真实写回**与字段长期漂移监控，与本版发布无关。
 
 **下一次发布时，出现下列任一情况就必须先补离线 harness 或做一次受控实跑，SKIP 才算阻塞**：
 

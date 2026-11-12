@@ -25,7 +25,7 @@
 
 ---
 
-## 1. 发布前门禁（十条，全绿才算候选）
+## 1. 发布前门禁（十一条，全绿才算候选）
 
 在仓库根执行，全部要求 **PowerShell 7（pwsh）**、离线、不读凭据：
 
@@ -53,7 +53,14 @@ pwsh -NoProfile -File tests/verify-install-drift.ps1                            
 pwsh -NoProfile -File tests/verify-install-drift.ps1 -InstalledPath "$env:CODEX_HOME\skills\patrol-scaffold"   # 实检
 ```
 
-### 1.1 期望输出（0.2.0 实测，2026-11-11，pwsh 7.6.5 / windows）
+外加 bitable 只读实跑闸门（默认走离线路径：CI 跑的就是它，缺凭据只 SKIP 不判红）：
+
+```powershell
+pwsh -NoProfile -File tests/verify-bitable-live.ps1           # 默认：分页/退出码离线自测 + live 段 SKIP，exit 0
+pwsh -NoProfile -File tests/verify-bitable-live.ps1 -Live     # 真读方向表 78 行并逐行归一（本机人工触发）
+```
+
+### 1.1 期望输出（0.2.0 实测，2026-11-11；bitable 只读闸门一行 2026-11-13 复测，pwsh 7.6.5 / windows）
 
 | 命令 | 判定行 | 判红标准 |
 |---|---|---|
@@ -66,7 +73,8 @@ pwsh -NoProfile -File tests/verify-install-drift.ps1 -InstalledPath "$env:CODEX_
 | `verify-command-adapter.ps1` | `summary pass=45 fail=0` | `fail>0` |
 | `verify-no-secrets.ps1` | `summary pass=12 fail=0 skip=0 hits=0` | `fail>0` 或 `hits>0` |
 | `verify-state-externalization.ps1` | `state externalization: PASS` | 任意断言 FAIL |
-| `verify-install-drift.ps1` | `summary selftest pass=14 fail=0` + `RESULT: PASS`；实检时另加 `summary checked=<N> ok=<N> fail=0` | `selftest fail>0`，或实检 `fail>0`（缺文件 / content / bom / extra / unreadable 任一） |
+| `verify-install-drift.ps1` | `summary selftest pass=16 fail=0` + `RESULT: PASS`；实检时另加 `summary checked=<N> ok=<N> fail=0` | `selftest fail>0`，或实检 `fail>0`（缺文件 / content / bom / extra / unreadable 任一） |
+| `verify-bitable-live.ps1` | 默认路径 `summary pass=6 skip=1 fail=0`（`-Live` 时 `pass=14 skip=0 fail=0`） | `fail>0`（缺凭据只 SKIP，不算红） |
 
 `adapter-contract-test` 的 `pass=3 skip=2` 是本版**正常**结果，不是缺陷：`command` / `csv-file` /
 `local-json` 实跑，`bitable` / `tencent-docs` 因无凭据 SKIP。SKIP 的判据、覆盖缺口与否决条件见 §5。
@@ -254,7 +262,7 @@ pwsh -NoProfile -File <repo>\tests\verify-install-drift.ps1 `
 
 | provider | 无凭据下已验证 | 缺口 | 本仓离线补偿 |
 |---|---|---|---|
-| `bitable` | 描述文件 + 模块 + 4 个函数存在 + 装配 | 真实 `lark-cli` 调用、字段名映射、分页 | **无**。`tests/verify-bitable-adapter.ps1` 是本地业务扩展，`.gitignore` 已排除，不随包分发 |
+| `bitable` | 描述文件 + 模块 + 4 个函数存在 + 装配 | 真实写回（本轮只读）；字段长期漂移监控 | 有：`tests/verify-bitable-live.ps1` 默认跑分页边界 + `lark-cli` 非零退出（6 条断言，live 段 SKIP）；`-Live` 可真读方向表 78 行并逐行归一。`tests/verify-bitable-adapter.ps1` 是本地业务扩展，`.gitignore` 已排除，不随包分发 |
 | `tencent-docs` | 同上（3 个函数） | 真实鉴权、真实分页边界、列标题与视图名 | 有：`tests/verify-tencent-docs-adapter.ps1` 用本地 mock HTTP 服务覆盖 2 页读取、归档行过滤、字段映射、epoch 转 ISO、镜像写回（14 条断言全绿） |
 
 ### 5.3 为什么不为真跑凭据阻塞 v0.2.0
@@ -265,8 +273,9 @@ pwsh -NoProfile -File <repo>\tests\verify-install-drift.ps1 `
 2. **凭据不能进 CI / 不能进仓**：本仓的安全底线是「密钥只从环境变量或仓外文件读、仓内不得出现明文」
    （`tests/verify-no-secrets.ps1` 是硬门禁）。为一次版本验收引入仓库 secret，等于用发布流程破坏
    自己刚立的安全约束。
-3. **阻塞的收益可被离线手段替代**：`tencent-docs` 的真实代码路径已由 mock 服务覆盖；`bitable` 的缺口
-   是「无离线 harness」，这是**已知技术债**，与本版发布无关，已记入 CHANGELOG 的 Known limits。
+3. **阻塞的收益可被离线手段替代**：`tencent-docs` 的真实代码路径已由 mock 服务覆盖；`bitable` 的读侧
+   也已有离线 harness（`tests/verify-bitable-live.ps1` 默认路径：分页边界 + `lark-cli` 非零退出 6 条断言，
+   live 段默认 SKIP），剩下的是**真实写回**与字段长期漂移监控，与本版发布无关。
 
 ### 5.4 恢复到「实跑」的条件（可执行，不需要改代码）
 

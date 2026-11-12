@@ -106,7 +106,7 @@ pwsh -File patrol-loop.ps1 -TasksFile sample-tasks.json -Once -DryRun
 | `command` | cli | 无 / 无（mock 命令随仓） | **PASS**（3 行） | `verify-command-adapter.ps1` 45 条断言 | 只写本地镜像 `state/command-mirror.json`，源永远只读 |
 | `csv-file` | file | 无 / 无 | **PASS**（3 行） | `verify-csv-file-adapter.ps1` 43 条断言 | 只改目标行的指定列，其余字节保留 |
 | `local-json` | file | 无 / 无 | **PASS** | `verify-provider-isolation.ps1` + dry-run | 写回任务 JSON（demo 链路不调用，源只读） |
-| `bitable` | cli | 需要（`lark-cli` + config）/ 需要 | **SKIP** | 行映射离线对拍 `tests/verify-item-parity-e2e.ps1`（对兄弟仓 TypeScript 原码，需 node + dsh-patrol 克隆）；`tests/verify-bitable-adapter.ps1` 是本地业务扩展，不入仓；`tests/record-bitable-golden.ps1` 可重采脱敏黄金样本（`tests/fixtures/`，同样不入仓）并喂给该对拍 | 受 `sync_back` + 显式 `-SyncBack` 双门控制 |
+| `bitable` | cli | 需要（`lark-cli` + config）/ 需要 | **SKIP** | 行映射离线对拍 `tests/verify-item-parity-e2e.ps1`（对兄弟仓 TypeScript 原码，需 node + dsh-patrol 克隆）；可选实跑 `tests/verify-bitable-live.ps1`（默认离线 SKIP，`-Live` 真读方向表 78 行并逐行归一）；`tests/verify-bitable-adapter.ps1` 是本地业务扩展，不入仓；`tests/record-bitable-golden.ps1` 可重采脱敏黄金样本（`tests/fixtures/`，同样不入仓）并喂给该对拍 | 受 `sync_back` + 显式 `-SyncBack` 双门控制 |
 | `tencent-docs` | api | 需要（开放平台凭据）/ 需要 | **SKIP** | `verify-tencent-docs-adapter.ps1` 本地 mock，14 条断言 | 默认只落镜像；配置 + 显式开关才写远端 |
 
 **SKIP 的判据只有一个**：`needsCredentials=true` 且 `configPath` 展开为空 → 跳过「真实 `list-items()` 实跑」。
@@ -117,6 +117,29 @@ pwsh -File patrol-loop.ps1 -TasksFile sample-tasks.json -Once -DryRun
 `$env:PATROL_TENCENT_DOCS_CONFIGPATH = "$env:USERPROFILE\.patrol\tencent-docs.json"`，再跑
 `pwsh -NoProfile -File scripts/adapter-contract-test.ps1 -Provider tencent-docs`。完整判据、两家的缺口清单、
 以及「什么情况下 SKIP 才算阻塞发布」，见 `docs/adapting-a-provider.md` §8 与 `docs/releasing.md` §5。
+
+### Bitable 只读实跑闸门（可选，默认 SKIP）
+
+`tests/verify-bitable-live.ps1` 是唯一会碰真实飞书表的门禁。默认不联网：先跑分页边界与
+`lark-cli` 非零退出两个离线自测，再对真实读取打印 `SKIP` 并 `exit 0`。
+
+```powershell
+pwsh -NoProfile -File tests/verify-bitable-live.ps1          # 离线自测 + live SKIP，exit 0
+pwsh -NoProfile -File tests/verify-bitable-live.ps1 -Live    # 真读方向表 78 行并逐行归一，exit 0/1
+```
+
+- **最小权限**：只读。user OAuth 只需 `base:record:read`（字段名随记录返回）；不申请
+  `base:record:create/update/delete`，不使用 app secret 或 tenant token。
+- **只读行为**：只调 `lark-cli base +record-list`，不调 `+record-upsert` / `+record-batch-*` /
+  `+record-delete`；写回留待人工批准单独一轮。
+- **缺凭据为何 SKIP**：没有 `lark-cli`、或 `lark-cli auth status` 的 user 身份未就绪时，本轮无法实跑；
+  这与 `adapter-contract-test` 的 SKIP 同义——**没实跑，不是通过**。默认不带 `-Live` 也直接 SKIP，所以
+  CI 不需要 secret。
+- **`-Live` 的硬断言**：按 `--offset/--limit` 分页取全表（默认每页 50）、行数 78（`-ExpectedRows` 可改，
+  `0` = 只要求非空）、字段含 `项目名` 与 `巡检间隔(分钟)`、每行过 `Convert-BitableRowToItem` 与
+  `ConvertTo-PatrolItem`；`lark-cli` 非零退出、分页不前进、字段缺失、行数不符都判红并带退出码/偏移量。
+- 资源 ID 默认是方向表 `Vb6.../tbl2...`，可用 `-BaseToken/-TableId` 或
+  `PATROL_BITABLE_BASE_TOKEN/PATROL_BITABLE_TABLE_ID` 覆盖。
 
 ### 跨仓两道闸门：静态契约面 + 动态解析面
 
@@ -218,6 +241,7 @@ pwsh -NoProfile -File scripts/build-release.ps1 -IncludeUntracked
 - `scripts/adapter-contract-test.ps1` — 适配器契约自测（遍历全部 provider；离线校验器）
 - `tests/verify-item-contract-parity.ps1` — 跨仓静态闸门：两份 `schemas/item.schema.json` 按约束面逐键比较（带坏样本自证）
 - `tests/verify-item-parity-e2e.ps1` + `tests/normalize-item-dsh.mjs` — 跨仓动态闸门：同一份 fixture 行同时喂本仓 `Convert-BitableRowToItem` 与兄弟仓 `bitable.ts`+`normalizeItem`（node 直跑 TS 原码），逐字段比到类型，不等即 exit 1
+- `tests/verify-bitable-live.ps1` — bitable 只读实跑闸门（可选，默认离线 SKIP）：默认跑分页边界 + `lark-cli` 非零退出自测（6 条断言），`-Live` 才真读方向表 78 行并逐行归一；只读，只需 `base:record:read`
 - `tests/verify-adapter-spec.ps1` — 描述文件规格漂移检查（必需键/类型、provider 唯一、module 存在、声明函数存在、`${占位}` 可解析；带坏样本自证）
 - `tests/verify-tencent-docs-adapter.ps1` — tencent-docs 端到端自测（本地 mock 服务，无需真凭据）
 - `tests/verify-csv-file-adapter.ps1` — csv-file 离线自测（%TEMP% 沙箱：列映射 / 引号逗号换行 / 缺列报错 / 写回字节保真 / 无 BOM）
@@ -229,10 +253,10 @@ pwsh -NoProfile -File scripts/build-release.ps1 -IncludeUntracked
 - `references/scheduled-task-recipe.md` — 触发器层注册 recipe
 - `tests/verify-no-secrets.ps1` — 密钥卫生门禁：扫全部受控文件，命中即非零退出
 - `tests/verify-provider-isolation.ps1` — 多 provider 同进程同名函数不串味（装配层回归）
-- `tests/verify-install-drift.ps1` — **安装漂移门禁**：已安装 skill 与仓库 HEAD 逐文件 SHA256（缺文件 / 内容漂移 / BOM / 多余源码文件 / 不可读均 `exit 1` 并点名；`downloads/` `memory/` `notify.log` 等运行时产物不误报也不删除）；带 14 条自证，装完 / 升完跑一次
+- `tests/verify-install-drift.ps1` — **安装漂移门禁**：已安装 skill 与仓库 HEAD 逐文件 SHA256（缺文件 / 内容漂移 / BOM / 多余源码文件 / 不可读均 `exit 1` 并点名；`downloads/` `memory/` `notify.log` 等运行时产物不误报也不删除）；带 16 条自证，装完 / 升完跑一次
 - `tests/verify-secret-history.ps1` — 历史密钥盘点：只报告命中提交，不改历史
 - `.githooks/pre-commit` — 把门禁挂到提交前：`git config core.hooksPath .githooks`
-- `.github/workflows/verify.yml` — CI（windows-latest / shell: pwsh）：描述文件规格漂移 + 全 provider 契约自测 + 跨仓 item 契约同源（静态 schema + 动态解析对拍）+ csv-file 离线自测 + command 离线自测 + 密钥卫生 + 发布归档自证（归档落 `RUNNER_TEMP`，不进工作树）
+- `.github/workflows/verify.yml` — CI（windows-latest / shell: pwsh）：描述文件规格漂移 + 全 provider 契约自测 + 跨仓 item 契约同源（静态 schema + 动态解析对拍）+ csv-file 离线自测 + command 离线自测 + bitable 只读实跑闸门（默认 SKIP，缺凭据不判红）+ 密钥卫生 + 发布归档自证（归档落 `RUNNER_TEMP`，不进工作树）
 
 ## License
 

@@ -15,6 +15,9 @@
 
 ### Added
 
+- **`tests/verify-bitable-live.ps1`：可选的 bitable 只读实跑闸门（默认离线 SKIP）。** 默认（不带 `-Live`）只跑两条离线自测——分页边界（`next_offset` 缺失时按本页行数推进，推进不了即报错判红，绝不空转）与 `lark-cli` 非零退出透传（mock `exit=23` 与真实 `.cmd` `exit /b 23` 两条）——再对真读打印 `SKIP` 并 `exit 0`，所以 CI 无凭据也不判红。`-Live` 用 `lark-cli base +record-list --as user` 只读方向表：实测 78 行、2 页分页（offset 0,50）、逐行 `Convert-BitableRowToItem` + `ConvertTo-PatrolItem` 归一 78/78，其中在跑 12 行、停跑 66 行（`intervalMin=0` 即停跑）。只读边界：user OAuth 只需 `base:record:read`，只调 `+record-list`，绝不调 `+record-upsert` / `+record-batch-*` / `+record-delete`；写回留待人工批准单独一轮。
+- **门禁入口已挂上**：`.github/workflows/verify.yml` 新增 `bitable live gate (default SKIP without credentials)`（走默认路径，不带 `-Live`）；`README.md` 增「Bitable 只读实跑闸门（可选，默认 SKIP）」一节；`docs/adapting-a-provider.md` §8.1、`docs/releasing.md` §1/§5 同步口径；`AGENTS.md` §7.4 补三条实测（真读口径 / 分页不前进判红 / 非零退出透传）与最小权限边界。
+
 - **`tests/record-bitable-golden.ps1`：可重采的脱敏黄金样本。** 用真实 `lark-cli base +record-list --format json` 取表，按固定规则脱敏（列名保留；文本转 `[虚构]`；仓库路径 / GitHub / thread id / 时间改虚构同型值；`rev` 固定 1000），一次采集即确定性输出（同表两次采集哈希相同）。矩阵形状（按列顺序的数组行、select 数组、link 对象数组、null 单元格）正是手写 fixture 盖不住的部分，故由本地对拍脚本直接消费；样本与 `verify-bitable-adapter.ps1` 仍按 `.gitignore` 留在本地，脚本入库，换机可重采。
 - **`tests/verify-install-drift.ps1`：安装后 / 升级后的哈希漂移门禁**。此前 skill 同步完只能手工核哈希：
   漏装新文件、拿到旧版内容、编辑器加 BOM、把本地实验脚本一起拷进 skill 目录，都不会有人报错。现在一条
@@ -26,11 +29,12 @@
   `SHA256SUMS.txt`）不计数也不删除——自检对安装目录只读。参数：`-RepoRoot`（仓路径）、`-InstalledPath`
   （已安装目录）、`-ManifestFile`（完整受控清单，给了一份就覆盖 HEAD 推导）、`-ExcludePath`（通配排除）、
   `-NoSelfTest`。
-- **该脚本自带 14 条自证**（%TEMP% 现造真 git 仓 + 6 个受控文件，其中一份模仿 `scripts/sample-tasks.json`）：
+- **该脚本自带 16 条自证**（%TEMP% 现造真 git 仓 + 6 个受控文件，其中一份模仿 `scripts/sample-tasks.json`）：
   干净副本 PASS、篡改一个字节 FAIL 且点名、缺文件 FAIL 且点名、运行态多余文件不误报且一个没少、多余源码
   文件 FAIL、BOM 报出（`kind=bom`，不是含糊的 content）、工作区脏但安装 == HEAD 仍 PASS（证明以 HEAD 为基
   准）、不可读文件 FAIL 且句柄释放后恢复 PASS、显式清单生效、`-ExcludePath` 生效、CRLF/LF 差异仍判红但
-  detail 点明换行符。无 `-InstalledPath` 时只跑自证段（CI 跑的就是这个），`summary selftest pass=14 fail=0`。
+  detail 点明换行符、落后一个提交的旧版副本 FAIL 且点名缺失新文件、新旧两版并存 FAIL 且点名多出的旧受控文件。
+  无 `-InstalledPath` 时只跑自证段（CI 跑的就是这个），`summary selftest pass=16 fail=0`。
 - **门禁入口已挂上**：`.github/workflows/verify.yml` 新增 `Install drift gate (self-test)`；
   `docs/releasing.md` §1 门禁清单第 10 条 + 新增 §3.1「装完 / 升完必须跑一次安装漂移自检」（含退出码与
   六类 `kind` 的口径）、§4 升级步骤 4b；`README.md` 安装段与文件清单同步。
@@ -147,7 +151,8 @@
 
 - `bitable` 与 `tencent-docs` 在无凭据环境是 **SKIP**（`needsCredentials=true` 且 `configPath` 为空）：
   只验到「描述文件 + 模块 + 函数存在 + 装配」，没有实跑真实 `list-items()`。`tencent-docs` 另有本地 mock
-  HTTP 服务的离线覆盖（14 条断言）；`bitable` 在本仓没有离线 harness。判定与恢复条件见
+  HTTP 服务的离线覆盖（14 条断言）；`bitable` 的读侧也已有离线 harness（`tests/verify-bitable-live.ps1`：
+  分页边界 + `lark-cli` 非零退出，6 条断言；真读段默认 SKIP，`-Live` 才实跑），但真实写回仍未被离线覆盖。判定与恢复条件见
   `docs/adapting-a-provider.md` §8。
 - 打包脚本在 Windows + PowerShell 7 上验证。zip 字节级可复现仅限同一台机器 / 同一 .NET 版本；
   跨机器请比对 `SHA256SUMS.txt` 的逐文件哈希（`docs/releasing.md` §3）。

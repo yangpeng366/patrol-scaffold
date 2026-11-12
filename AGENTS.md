@@ -99,6 +99,7 @@ pwsh -NoProfile -File tests/verify-adapter-spec.ps1             # 描述文件�
 pwsh -NoProfile -File tests/verify-disabled-scheduling.ps1      # 停跑语义
 pwsh -NoProfile -File tests/verify-decision-prompt.ps1          # 提示词决策层
 pwsh -NoProfile -File tests/verify-bitable-golden-sanitizer.ps1 # 黄金样本脱敏
+pwsh -NoProfile -File tests/verify-bitable-live.ps1           # bitable 只读实跑闸门（默认离线，live 段 SKIP）
 pwsh -NoProfile -File tests/verify-state-externalization.ps1    # 运行态外置、源只读
 pwsh -NoProfile -File tests/verify-provider-isolation.ps1      # 同名函数不串味
 pwsh -NoProfile -File tests/verify-csv-file-adapter.ps1        # csv-file 自测
@@ -155,7 +156,23 @@ pwsh -NoProfile -File tests/verify-item-parity-e2e.ps1          # 跨仓动态�
 **原因**：这批是 gitignored 的本机扩展，不属脚手架；默认配置的 `api_script_path` 指向真实 Typesafe API。
 **对策**：离线改用 `jev-shadow-hooks\fake-jev.ps1`（配置里 `enabled` + `api_script_path` 指过去）；真实 key 那条用显式开关控制实跑 —— `PATROL_JEV_LIVE=1` 才开闸，缺 key 就记 SKIP 而不是硬失败。复现：`pwsh -NoProfile -File tests/verify-item-jev-decision.ps1`（离线 pass=11 fail=0 skip=1）
 
-### 7.4 本地自测怎么跑
+### 7.4 真读方向表（bitable 只读实跑）
+
+**症状**：想确认「真实方向表到底多少行、逐行归一是否全过」，没有闸门只能肉眼扫输出。
+**原因**：契约自测对 `bitable` 无凭据即 SKIP，离线对拍只验行形状、不碰真表。
+**对策**：`pwsh -NoProfile -File tests/verify-bitable-live.ps1 -Live` 只读实测——78 行、2 页分页（offset 0,50）、逐行 `Convert-BitableRowToItem` + `ConvertTo-PatrolItem` 归一 78/78；口径为 12 行在跑、66 行停跑（`intervalMin=0` 即停跑）。
+
+**症状**：分页 offset 不前进仍在循环，表格静默少读几行还不报错。
+**原因**：`lark-cli` 的 json 在 `has_more=true` 时可能不给 `next_offset`；空值若被兜底成同一 offset，就是空转。
+**对策**：`next_offset` 缺失时按「offset + 本页行数」推进；推进不了（`next ≤ offset`）立即报错判红，绝不空转；离线用「`has_more=true` 且本页 0 行」的假响应复现。
+
+**症状**：`lark-cli` 子进程非零退出被当成成功，权限被拒的空输出被读成「表是空的」。
+**原因**：退出码若不显式收口，`& lark-cli … | Out-String` 的管道与 Windows 上的 `.cmd` 包装会让 `$LASTEXITCODE` 丢失或被后续命令覆盖。
+**对策**：调用后立刻把 `$LASTEXITCODE` 存进结果对象，非零即抛错并把退出码写进消息（mock `exit=23` 与真实 `.cmd` `exit /b 23` 两条都复现），不得吞掉当成功。
+
+**最小权限边界**：只读——user OAuth 只需 `base:record:read`，不申请 `base:record:create/update/delete`，不用 app secret 或 tenant token；只调 `lark-cli base +record-list`，绝不调 `+record-upsert` / `+record-batch-*` / `+record-delete`，写回留待人工批准单独一轮。默认（不带 `-Live`）只跑离线自测并打印 SKIP、`exit 0`——CI 无凭据不判红；真读由本机人工 `-Live` 触发。
+
+### 7.5 本地自测怎么跑
 
 零凭据、零网络，文件名以 `tests/` 下实际存在的为准：
 
@@ -165,6 +182,7 @@ pwsh -NoProfile -File tests/verify-adapter-spec.ps1             # 描述文件�
 pwsh -NoProfile -File tests/verify-disabled-scheduling.ps1      # 停跑语义
 pwsh -NoProfile -File tests/verify-decision-prompt.ps1          # 提示词决策层 pass=27 fail=0
 pwsh -NoProfile -File tests/verify-bitable-golden-sanitizer.ps1 # 黄金样本脱敏
+pwsh -NoProfile -File tests/verify-bitable-live.ps1           # bitable 只读实跑闸门（默认离线，live 段 SKIP）
 pwsh -NoProfile -File tests/verify-state-externalization.ps1    # 运行态外置、源只读
 pwsh -NoProfile -File tests/verify-provider-isolation.ps1      # 同名函数不串味 pass=12 fail=0
 pwsh -NoProfile -File tests/verify-csv-file-adapter.ps1        # csv-file pass=43 fail=0

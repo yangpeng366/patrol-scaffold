@@ -182,6 +182,7 @@ to parse. Judge reds by pwsh 7 only.
   凭据变量赋字面量 / AK-IA / gh-p_），并断言两个 JEV verify 脚本只从环境变量或仓库外密钥文件读；命中 FAIL 非零退出。
 - `tests/verify-secret-history.ps1` - 历史盘点（`git log -p --all`），只报告命中提交/文件 + 轮换建议，永不失败、不改历史。
 - `tests/verify-provider-isolation.ps1` - 装配层回归：四个 provider（bitable / tencent-docs / local-json / command）同名函数（Get-PatrolItems 等）同进程依次装配时互不串味；老实现必红。
+- `tests/verify-bitable-live.ps1` - 可选实跑闸门：默认离线（分页边界 + `lark-cli` 非零退出 6 条断言，live 段 SKIP，CI 无凭据不判红）；`-Live` 只读方向表并逐行归一（实测 78 行 / 2 页），最小权限只要 `base:record:read`，不写回。
 - `tests/verify-command-adapter.ps1` - command 离线自测：mock 命令 / 信封与 itemsPath / 退出码 / 超时 / banner / fieldMap / 镜像幂等 / 与 local-json 形状一致。
 - `references/local-json-adapter.md` - provider=local-json 适配器文档 + 拷贝即跑 dry-run 指南。
 - `references/csv-file-adapter.md` - provider=csv-file 的 11 节规格：本地 CSV 源（零网络零凭据），含「什么时候该用 / 不该用」与已知边界。
