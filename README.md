@@ -16,6 +16,20 @@
 **适应性的三层落法**（这版起）：契约有 schema 与自测硬约束，装配靠声明式描述文件，
 扩展有填表式规格模板。新增一个 provider = 两个文件 + 一次自测 PASS，**主循环不改**。
 
+## 一键安装（面向 Agent）
+
+```bash
+# 一键安装：装到本机 agent（Codex / Claude Code / Cursor / OpenCode 等）
+npx skills add yangpeng366/patrol-scaffold
+
+# 不装只查：列出该仓可收录的 skill
+npx skills add yangpeng366/patrol-scaffold --list
+```
+
+装完即得本仓根 `SKILL.md` 的指引（架构、数据源契约、加源步骤、离线自测门禁），可供
+Codex / Claude Code / Cursor / OpenCode 等 agent 直接调用。手动归档安装、升级与安装后自检见
+[安装、升级与打包](#安装升级与打包)。
+
 ## 解决什么问题
 
 任何「周期性读一个任务表 → 给每行派发一段有界 agent 工作 → 回写结果 → 摘要入库 →
@@ -161,6 +175,9 @@ args 里的 `${...}` 占位能在 `config` 中解析（`${tasksFile}` 例外，�
 两个脚本都是 UTF-8 无 BOM，Windows PowerShell 5.1 会把中文按 ANSI 解码而解析失败。
 
 ## 安装、升级与打包
+
+面向 agent 的一键安装（`npx skills add yangpeng366/patrol-scaffold`）见上文
+[一键安装（面向 Agent）](#一键安装面向-agent)；以下是不走收录器的手动归档安装。
 
 ```powershell
 # 新装：从发布归档（或 skill-installer / 直接拷目录，三种等价）

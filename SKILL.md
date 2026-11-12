@@ -1,3 +1,8 @@
+---
+name: patrol-scaffold
+description: 巡检任务脚手架 agent skill：把「周期性读一张方向表 → 给每行派有界 agent 工作 → 回写 → 出摘要」实例化，用于飞书多维表格（Bitable）/ 腾讯文档智能表格 / 本地 CSV / 命令输出 / 本地 JSON 五种数据源；换源只加 adapter 与模块两个文件，调度器不动；含定时任务（计划任务 / nssm）、凭据与脱敏纪律、离线 fixture 与 PowerShell 自测门禁。
+---
+
 Runtime: both `verify-adapter-spec.ps1` and `adapter-contract-test.ps1` require PowerShell 7
 (`pwsh`). They are UTF-8 without BOM; Windows PowerShell 5.1 decodes them as ANSI and fails
 to parse. Judge reds by pwsh 7 only.
