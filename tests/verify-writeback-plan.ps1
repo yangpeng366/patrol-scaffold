@@ -16,6 +16,9 @@
          一字未变 -> unchanged；两种情况写手调用次数都必须为 0。
       4. 失败面不许假装成功：写手报失败 / 输出不是 JSON / 漏报某行 -> exit 1，失败行
          不入账（可原样重试），成功行照常入账；账本损坏 -> exit 2 fail-closed。
+      5. 双门组合不许漏写或假装成功：provider 能力槽有两道门——描述文件声明
+         `optional.syncBack`（门 A）、provider 配置 `sync_back`（门 B）。四象限各真跑一次
+         `-Apply`：只有 A∧B 才写并 exit 0；缺任一门都 exit 1、零写入、零入账。
 
     全部用例在 %TEMP% 现造 digest / state / ledger / 写手替身，跑完 finally 删除。写手替身不放进
     仓内 fixtures：`tests/fixtures/` 在 .gitignore 里（本地真实样本目录，不入仓），替身由本脚本在
@@ -50,8 +53,8 @@ function Assert-Case {
 }
 
 function Invoke-Writeback {
-    param([string[]]$WbArgs)
-    $out = & pwsh -NoProfile -File $scriptPath @WbArgs 2>&1
+    param([string[]]$WbArgs, [string]$Script = $scriptPath)
+    $out = & pwsh -NoProfile -File $Script @WbArgs 2>&1
     $code = $LASTEXITCODE
     $text = (@($out) | ForEach-Object { [string]$_ }) -join "`n"
     return [pscustomobject]@{ ExitCode = $code; Text = $text }
@@ -347,9 +350,154 @@ exit 0
     Assert-Case '8) provider 没有 syncBack 能力 -> 退出码 1 且不入账' (
         $r.ExitCode -eq 1 -and -not (Test-Path -LiteralPath (Join-Path $root 'state\provider-ledger.json'))) "exit=$($r.ExitCode)"
     Assert-Case '8) 失败原因点名能力槽' ($r.Text -match 'syncBack|能力槽')
+
+    # ---- 9) 双门组合：能力声明门（descriptor.optional.syncBack）× 配置门（config.sync_back）----
+    # 端到端真跑：临时 provider 的两道门四个象限各跑一次 -Apply，只有 A∧B 允许写。
+    # 临时 provider 落在 %TEMP% 的临时仓根（只拷被测的三个脚本，逐字节相同），
+    # 因为 Import-PatrolProvider 按「脚本所在仓根」找 adapters/ —— 这样不必往本仓 adapters/ 写临时文件。
+    $gateRoot = Join-Path $root 'gate-root'
+    New-Item -ItemType Directory -Force -Path (Join-Path $gateRoot 'scripts'), (Join-Path $gateRoot 'adapters') | Out-Null
+    $gateCopiesSame = $true
+    foreach ($scriptName in @('patrol-writeback.ps1', 'patrol-provider.ps1', 'patrol-state.ps1')) {
+        $srcPath = Join-Path $RepoRoot (Join-Path 'scripts' $scriptName)
+        $dstPath = Join-Path $gateRoot (Join-Path 'scripts' $scriptName)
+        Copy-Item -LiteralPath $srcPath -Destination $dstPath
+        if ((Get-FileHashHex $srcPath) -ne (Get-FileHashHex $dstPath)) { $gateCopiesSame = $false }
+    }
+    Assert-Case '9) 临时仓根里的被测脚本与本仓逐字节相同' $gateCopiesSame
+
+    $gateScript = Join-Path $gateRoot 'scripts\patrol-writeback.ps1'
+    $gateProvider = 'wbgate'
+    $gateDescriptorPath = Join-Path $gateRoot 'adapters\wbgate.adapter.json'
+    $gateCfgOn = Join-Path $root 'gate-on.json'
+    $gateCfgOff = Join-Path $root 'gate-off.json'
+    [System.IO.File]::WriteAllText($gateCfgOn, '{"sync_back":true}', $utf8)
+    [System.IO.File]::WriteAllText($gateCfgOff, '{"sync_back":false}', $utf8)
+
+    # 临时 provider 模块：syncBack 的门 A 由描述文件是否声明来决定（装配层判断），
+    # 门 B 由配置文件 sync_back 决定（模块自己判断）。开门时把 id + 阶段写进记录文件，
+    # 既能证明能力槽真被调用，也能证明 payload 字段真的送到了这一层。
+    $gateModule = Join-Path $gateRoot 'scripts\wbgate-adapter.ps1'
+    $gateModuleSource = @'
+#requires -Version 7
+function Get-PatrolItems {
+    param([Parameter(Mandatory)][string]$ConfigPath)
+    throw 'wbgate: listItems 不该在回写用例里被调用'
+}
+function Save-PatrolItems {
+    param([Parameter(Mandatory)][string]$MirrorFile, $Items)
+    throw 'wbgate: writeBack 不该在回写用例里被调用'
+}
+function Resolve-ItemName {
+    param($Item)
+    return $Item.title
+}
+function Sync-PatrolItemsFake {
+    param([Parameter(Mandatory)][string]$GateConfigPath, [Parameter(Mandatory)]$Item)
+    $utf8 = [System.Text.UTF8Encoding]::new($false)
+    if (-not (Test-Path -LiteralPath $GateConfigPath -PathType Leaf)) { throw "wbgate: 缺配置 $GateConfigPath" }
+    $cfg = [System.IO.File]::ReadAllText($GateConfigPath, $utf8) | ConvertFrom-Json
+    if (-not $cfg.sync_back) { return $false }
+    if ($env:FAKE_GATE_RECORD) {
+        Add-Content -LiteralPath $env:FAKE_GATE_RECORD -Value ([string]$Item.id + "`t" + [string]$Item.currentStage) -Encoding utf8NoBOM
+    }
+    return $true
+}
+'@
+    [System.IO.File]::WriteAllText($gateModule, $gateModuleSource, $utf8)
+
+    function Write-GateAdapter {
+        param([bool]$DeclareCapability, [string]$ConfigPath)
+        $optional = [ordered]@{}
+        if ($DeclareCapability) {
+            $optional['syncBack'] = [ordered]@{
+                function = 'Sync-PatrolItemsFake'
+                args     = [ordered]@{ GateConfigPath = '${configPath}' }
+            }
+        }
+        $doc = [ordered]@{
+            provider         = $gateProvider
+            title            = '回写层双门用例的临时 provider'
+            module           = 'scripts/wbgate-adapter.ps1'
+            kind             = 'file'
+            needsCredentials = $false
+            needsNetwork     = $false
+            description      = 'tests/verify-writeback-plan.ps1 §9 在 %TEMP% 现造：只用于验证能力声明门 × 配置门'
+            config           = [ordered]@{ configPath = $ConfigPath; mirrorFile = (Join-Path $root 'gate-mirror.json') }
+            listItems        = [ordered]@{ function = 'Get-PatrolItems'; args = [ordered]@{ ConfigPath = '${configPath}' } }
+            writeBack        = [ordered]@{ function = 'Save-PatrolItems'; args = [ordered]@{ MirrorFile = '${mirrorFile}' } }
+            resolveName      = [ordered]@{ function = 'Resolve-ItemName'; args = [ordered]@{} }
+            optional         = $optional
+        }
+        [System.IO.File]::WriteAllText($gateDescriptorPath, ($doc | ConvertTo-Json -Depth 8), $utf8)
+    }
+
+    $gateDigest = Join-Path $root 'digest-gate.json'
+    New-DigestFile -Path $gateDigest -Stamp '20261115-150000' -Method $gateProvider -Items @(
+        (New-Row -Id 'g1' -Stage '走 provider 槽' -Achievement '门全开')
+    )
+    $gateRecord = Join-Path $root 'gate-record.txt'
+    $gateLedgerOn = Join-Path $root 'state\gate-on-ledger.json'
+    $gateLedgerOff = Join-Path $root 'state\gate-off-ledger.json'
+    $gateLedgerNoCap = Join-Path $root 'state\gate-nocap-ledger.json'
+    $gateLedgerBothOff = Join-Path $root 'state\gate-both-off-ledger.json'
+    $env:FAKE_GATE_RECORD = $gateRecord
+
+    # 9a) A 开 + B 开：preview 仍零调用（能力槽只在 -Apply 之后才碰）
+    Write-GateAdapter -DeclareCapability $true -ConfigPath $gateCfgOn
+    $r = Invoke-Writeback @('-DigestPath', $gateDigest, '-StateFile', $state, '-LedgerFile', $gateLedgerOn, '-Target', 'gate/table', '-PlanFile', $plan) -Script $gateScript
+    Assert-Case '9) 双门全开 preview：exit 0 且能力槽零调用' (
+        $r.ExitCode -eq 0 -and -not (Test-Path -LiteralPath $gateRecord) -and $r.Text -match '零远端写入') "exit=$($r.ExitCode)"
+
+    # 9b) A 开 + B 开：真写 -> 能力槽被调用、字段送达、入账、exit 0
+    $r = Invoke-Writeback @('-DigestPath', $gateDigest, '-StateFile', $state, '-LedgerFile', $gateLedgerOn, '-Target', 'gate/table', '-PlanFile', $plan, '-Apply') -Script $gateScript
+    $gateLine = if (Test-Path -LiteralPath $gateRecord) { (@(Get-Content -LiteralPath $gateRecord) -join '|') } else { '' }
+    Assert-Case '9) 双门全开 apply：exit 0 且能力槽收到 id + 字段' (
+        $r.ExitCode -eq 0 -and $gateLine -match '^g1\s+走 provider 槽$') "exit=$($r.ExitCode) line=$gateLine"
+    $gateLedgerDoc = [System.IO.File]::ReadAllText($gateLedgerOn, $utf8) | ConvertFrom-Json
+    Assert-Case '9) 双门全开 apply：账本记 1 条且 writer 标 provider' (
+        (@($gateLedgerDoc.entries)).Count -eq 1 -and [string](@($gateLedgerDoc.entries)[0].writer) -eq 'provider:wbgate')
+    $gatePlanDoc = Get-PlanDoc $plan
+    Assert-Case '9) 双门全开 apply：plan 记 result.ok=true' (
+        (@($gatePlanDoc.items | Where-Object { $_.result -and $_.result.ok })).Count -eq 1)
+
+    # 9c) provider 通道同样受幂等键约束：重放不写、不再调能力槽
+    $beforeGateLines = @(Get-Content -LiteralPath $gateRecord).Count
+    $r = Invoke-Writeback @('-DigestPath', $gateDigest, '-StateFile', $state, '-LedgerFile', $gateLedgerOn, '-Target', 'gate/table', '-PlanFile', $plan, '-Apply') -Script $gateScript
+    Assert-Case '9) 双门全开重放：apply=0 replay=1 且能力槽不再调用' (
+        $r.ExitCode -eq 0 -and $r.Text -match 'apply=0' -and $r.Text -match 'replay=1' -and
+        @(Get-Content -LiteralPath $gateRecord).Count -eq $beforeGateLines) "exit=$($r.ExitCode)"
+
+    # 9d) A 开 + B 关：模块自己拒绝 -> exit 1、零写入、零入账
+    Remove-Item -LiteralPath $gateRecord -Force -ErrorAction SilentlyContinue
+    Write-GateAdapter -DeclareCapability $true -ConfigPath $gateCfgOff
+    $r = Invoke-Writeback @('-DigestPath', $gateDigest, '-StateFile', $state, '-LedgerFile', $gateLedgerOff, '-Target', 'gate/table', '-PlanFile', $plan, '-Apply') -Script $gateScript
+    Assert-Case '9) 配置门关（能力声明在）：exit 1、零调用、零入账且点名配置门' (
+        $r.ExitCode -eq 1 -and -not (Test-Path -LiteralPath $gateRecord) -and
+        -not (Test-Path -LiteralPath $gateLedgerOff) -and $r.Text -match '配置门|syncBack') "exit=$($r.ExitCode)"
+
+    # 9e) A 关 + B 开：装配层只看描述文件，配置开着也不能绕过 -> exit 1、零调用、零入账
+    Write-GateAdapter -DeclareCapability $false -ConfigPath $gateCfgOn
+    $r = Invoke-Writeback @('-DigestPath', $gateDigest, '-StateFile', $state, '-LedgerFile', $gateLedgerNoCap, '-Target', 'gate/table', '-PlanFile', $plan, '-Apply') -Script $gateScript
+    Assert-Case '9) 能力声明缺（配置门开着）：exit 1、零调用、零入账且点名能力槽' (
+        $r.ExitCode -eq 1 -and -not (Test-Path -LiteralPath $gateRecord) -and
+        -not (Test-Path -LiteralPath $gateLedgerNoCap) -and $r.Text -match 'syncBack|能力槽') "exit=$($r.ExitCode)"
+
+    # 9f) A 关 + B 关：同样失败，且不是靠模块抛错才失败
+    Write-GateAdapter -DeclareCapability $false -ConfigPath $gateCfgOff
+    $r = Invoke-Writeback @('-DigestPath', $gateDigest, '-StateFile', $state, '-LedgerFile', $gateLedgerBothOff, '-Target', 'gate/table', '-PlanFile', $plan, '-Apply') -Script $gateScript
+    Assert-Case '9) 双门全关：exit 1、零入账' (
+        $r.ExitCode -eq 1 -and -not (Test-Path -LiteralPath $gateLedgerBothOff)) "exit=$($r.ExitCode)"
+
+    # 9g) 隔离自证：临时 provider 没在仓内 adapters/ 留下文件
+    Assert-Case '9) 临时 provider 不落地本仓 adapters/' (
+        -not (Test-Path -LiteralPath (Join-Path $RepoRoot 'adapters\wbgate.adapter.json')) -and
+        -not (Test-Path -LiteralPath (Join-Path $RepoRoot 'scripts\wbgate-adapter.ps1')))
+    $env:FAKE_GATE_RECORD = ''
 }
 finally {
     Reset-WriterEnv
+    $env:FAKE_GATE_RECORD = ''
     foreach ($k in @($savedEnv.Keys)) {
         [Environment]::SetEnvironmentVariable($k, $savedEnv[$k])
     }

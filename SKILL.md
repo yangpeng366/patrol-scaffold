@@ -184,7 +184,7 @@ to parse. Judge reds by pwsh 7 only.
 - `tests/verify-provider-isolation.ps1` - 装配层回归：四个 provider（bitable / tencent-docs / local-json / command）同名函数（Get-PatrolItems 等）同进程依次装配时互不串味；老实现必红。
 - `tests/verify-bitable-live.ps1` - 可选实跑闸门：默认离线（分页边界 + `lark-cli` 非零退出 6 条断言，live 段 SKIP，CI 无凭据不判红）；`-Live` 只读方向表并逐行归一（实测 78 行 / 2 页），最小权限只要 `base:record:read`，不写回。
 - `tests/verify-command-adapter.ps1` - command 离线自测：mock 命令 / 信封与 itemsPath / 退出码 / 超时 / banner / fieldMap / 镜像幂等 / 与 local-json 形状一致。
-- `tests/verify-writeback-plan.ps1` - 回写层离线自测（41 条断言）：preview-first 默认零远端写入且逐字节不改 digest/state、幂等键确定性/敏感性（stamp/provider/target/内容）、重放与内容去重一行不写、写手报失败/非 JSON/漏报 -> exit 1 且失败行不入账、账本损坏 -> exit 2 fail-closed。配套 `scripts/patrol-writeback.ps1`。
+- `tests/verify-writeback-plan.ps1` - 回写层离线自测（51 条断言）：preview-first 默认零远端写入且逐字节不改 digest/state、幂等键确定性/敏感性（stamp/provider/target/内容）、重放与内容去重一行不写、写手报失败/非 JSON/漏报 -> exit 1 且失败行不入账、账本损坏 -> exit 2 fail-closed；并用 %TEMP% 现造临时 provider 把 provider 能力槽的「能力声明门（`optional.syncBack`）× 配置门（`config.sync_back`）」四象限各真跑一次 `-Apply`（仅双门全开写入并入账，缺任一门 exit 1/零写入）。配套 `scripts/patrol-writeback.ps1`。
 - `references/local-json-adapter.md` - provider=local-json 适配器文档 + 拷贝即跑 dry-run 指南。
 - `references/csv-file-adapter.md` - provider=csv-file 的 11 节规格：本地 CSV 源（零网络零凭据），含「什么时候该用 / 不该用」与已知边界。
 - `tests/verify-adapter-spec.ps1` - descriptor/spec drift gate: required keys and types, unique provider matching the file name, module path exists, declared functions exist after a read-only dot-source, `${...}` placeholders resolvable in `config`; built-in broken-fixture self-test.

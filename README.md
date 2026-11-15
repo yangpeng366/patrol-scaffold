@@ -161,8 +161,9 @@ pwsh -NoProfile -File scripts/patrol-writeback.ps1 -DigestPath <digest> -Target 
   一律 `exit 2` fail-closed，绝不当空账重来一遍。
 - **字段**：`currentStage` / `achievement` / `nextStep` / `threadId`，空值不写；`nextStep` 只有 digest 行
   真的带上时才写（它属于源表行，本仓的 digest 默认不含）。
-- **离线门禁**：`tests/verify-writeback-plan.ps1`（41 条断言，零凭据零网络：preview 逐字节只读、键的
-  确定性/敏感性、重放与内容去重不写、写手报失败/非 JSON/漏报 -> `exit 1` 且失败行不入账、账本损坏 -> `exit 2`）。
+- **离线门禁**：`tests/verify-writeback-plan.ps1`（51 条断言，零凭据零网络：preview 逐字节只读、键的
+  确定性/敏感性、重放与内容去重不写、写手报失败/非 JSON/漏报 -> `exit 1` 且失败行不入账、账本损坏 -> `exit 2`；
+  provider 能力槽的「能力声明门 × 配置门」四象限各真跑一次 `-Apply`，只有双门全开才写）。
 
 ### 跨仓两道闸门：静态契约面 + 动态解析面
 

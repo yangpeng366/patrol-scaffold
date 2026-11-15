@@ -26,12 +26,18 @@
   `-WriterScript` 走自定义/离线通道。字段口径 `currentStage` / `achievement` / `nextStep` / `threadId`，
   空值不写；`nextStep` 只在 digest 行真带上时才写（属源表行，本仓 digest 默认不含）。退出码：0 全成、
   1 有行写失败（失败行不入账，可原样重试）、2 用法/环境错误（含账本损坏——刻意 fail-closed，不当空账重来）。
-- **`tests/verify-writeback-plan.ps1`：该层的离线门禁（41 条断言，零凭据零网络）。** 覆盖：preview
+- **`tests/verify-writeback-plan.ps1`：该层的离线门禁（51 条断言，零凭据零网络）。** 覆盖：preview
   逐字节不改 digest/state、不建账本、不调写手；键的确定性（两跑同键）与敏感性（stamp/provider/target/内容
   任一变化必换键，同内容不抖动）；同 digest 重放 `replay=3` 且写手调用 0 次；换 stamp 内容未变
   `unchanged=2` 且一行不写；写手报失败/输出非 JSON/漏报某行 → `exit 1` 且只失败行不入账、重试只补那一行；
   账本损坏或 version 不认识 → `exit 2`；provider 没有 syncBack 能力 → `exit 1` 不假装成功。写手替身在
-  `%TEMP%` 现造（`tests/fixtures/` 在 .gitignore 里，不在仓内放替身），CI 同样自包含。门禁已挂进
+  `%TEMP%` 现造（`tests/fixtures/` 在 .gitignore 里，不在仓内放替身），CI 同样自包含。
+
+  新增 §9「provider 双门组合」端到端：临时 provider（`%TEMP%` 里只拷被测的三个脚本，哈希断言与本仓
+  逐字节相同）把两道门做成四象限，各真跑一次 `-Apply` —— 门 A = 描述文件是否声明 `optional.syncBack`，
+  门 B = 配置 `sync_back`。只有 A∧B 才 `exit 0` + 能力槽收到字段 + 账本记 1 条（`writer=provider:wbgate`）；
+  A 开 B 关、A 关 B 开、双关三种负例一律 `exit 1`、能力槽零调用、不建账本。provider 通道也验证幂等：
+  同一 digest 重放 `replay=1`，不再调能力槽。门禁已挂进
   `.github/workflows/verify.yml`（`writeback plan self-test`）。
 
 - **`tests/verify-bitable-live.ps1`：可选的 bitable 只读实跑闸门（默认离线 SKIP）。** 默认（不带 `-Live`）只跑两条离线自测——分页边界（`next_offset` 缺失时按本页行数推进，推进不了即报错判红，绝不空转）与 `lark-cli` 非零退出透传（mock `exit=23` 与真实 `.cmd` `exit /b 23` 两条）——再对真读打印 `SKIP` 并 `exit 0`，所以 CI 无凭据也不判红。`-Live` 用 `lark-cli base +record-list --as user` 只读方向表：实测 78 行、2 页分页（offset 0,50）、逐行 `Convert-BitableRowToItem` + `ConvertTo-PatrolItem` 归一 78/78，其中在跑 12 行、停跑 66 行（`intervalMin=0` 即停跑）。只读边界：user OAuth 只需 `base:record:read`，只调 `+record-list`，绝不调 `+record-upsert` / `+record-batch-*` / `+record-delete`；写回留待人工批准单独一轮。
