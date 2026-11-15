@@ -28,6 +28,7 @@
 | `scripts/patrol-loop.ps1` | 调度器：due-list、worker 池、回写、digest；换 provider 只靠 `PATROL_ADAPTER` |
 | `scripts/patrol-schedule.ps1` | 到期判定（`Get-PatrolDueSelection`）：`intervalMin` 0/空/缺列/负数 = 停跑 |
 | `scripts/patrol-state.ps1` | 运行态外置（`state/patrol-state.json`），源保持只读 |
+| `scripts/patrol-writeback.ps1` | 回写层：digest → 计划（preview 默认零写入）+ 幂等键 + 账本 `state/writeback-ledger.json`；`-Apply` 才真写 |
 | `scripts/adapter-contract-test.ps1` | 契约自测：装配 → list-items → 每行过 schema → resolve-name |
 | `scripts/build-release.ps1` | 可复现打包 + 归档自证（产物落 `%TEMP%`，不入仓） |
 | `prompts/decide-next-action.md` + `scripts/decide-next-action.ps1` | 模型决策层：提示词 + 只做解析的脚本 |
@@ -104,6 +105,7 @@ pwsh -NoProfile -File tests/verify-state-externalization.ps1    # 运行态外�
 pwsh -NoProfile -File tests/verify-provider-isolation.ps1      # 同名函数不串味
 pwsh -NoProfile -File tests/verify-csv-file-adapter.ps1        # csv-file 自测
 pwsh -NoProfile -File tests/verify-command-adapter.ps1          # command 自测
+pwsh -NoProfile -File tests/verify-writeback-plan.ps1           # 回写层：preview-first + 幂等键（41 条断言）
 pwsh -NoProfile -File tests/verify-tencent-docs-adapter.ps1     # 腾讯文档 mock 自测
 pwsh -NoProfile -File tests/verify-no-secrets.ps1               # 密钥卫生
 pwsh -NoProfile -File tests/verify-item-contract-parity.ps1     # 跨仓静态同源

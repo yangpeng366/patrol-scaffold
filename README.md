@@ -141,6 +141,29 @@ pwsh -NoProfile -File tests/verify-bitable-live.ps1 -Live    # 真读方向表 7
 - 资源 ID 默认是方向表 `Vb6.../tbl2...`，可用 `-BaseToken/-TableId` 或
   `PATROL_BITABLE_BASE_TOKEN/PATROL_BITABLE_TABLE_ID` 覆盖。
 
+### 回写层：preview-first + 幂等键（默认零远端写入）
+
+`scripts/patrol-writeback.ps1` 把一轮 digest 翻成**可审阅的回写计划**：每行写明写哪些字段、幂等键、
+以及为什么写/为什么不写（`apply` / `replay` / `unchanged` / `empty` / `noid`）。默认档只打印，
+**零网络、零远端写入、连账本都不建**；`-Apply` 是唯一写入口。
+
+```powershell
+# 只看计划（默认）
+pwsh -NoProfile -File scripts/patrol-writeback.ps1 -DigestPath scripts/downloads/patrol-<stamp>.json -PlanFile $env:TEMP\plan.json
+# 真写：走 provider 的 optional.syncBack（bitable 仍受 config.sync_back 这道门约束）
+pwsh -NoProfile -File scripts/patrol-writeback.ps1 -DigestPath <digest> -Target "<base_token>/<table_id>" -Apply
+```
+
+- **幂等键**：`sha256("v1|<provider>|<target>|<stamp>|<itemId>|<payloadJson>")`。同一 digest 重放=同键，
+  账本里已有就不写；换 `stamp` 但内容一字未变=内容哈希相同，也不写；`provider` / `target` 参与键空间，
+  换表不会把另一张表的历史当成「已写」。
+- **账本**：默认 `state/writeback-ledger.json`，只追加、只记成功写入（失败行可原样重试）；账本损坏
+  一律 `exit 2` fail-closed，绝不当空账重来一遍。
+- **字段**：`currentStage` / `achievement` / `nextStep` / `threadId`，空值不写；`nextStep` 只有 digest 行
+  真的带上时才写（它属于源表行，本仓的 digest 默认不含）。
+- **离线门禁**：`tests/verify-writeback-plan.ps1`（41 条断言，零凭据零网络：preview 逐字节只读、键的
+  确定性/敏感性、重放与内容去重不写、写手报失败/非 JSON/漏报 -> `exit 1` 且失败行不入账、账本损坏 -> `exit 2`）。
+
 ### 跨仓两道闸门：静态契约面 + 动态解析面
 
 两份 `schemas/item.schema.json` 的对比只能证明「契约文本同源」，证明不了「同一行解析出同一个 item」。

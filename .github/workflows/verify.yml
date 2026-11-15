@@ -119,6 +119,13 @@ jobs:
         shell: pwsh
         run: pwsh -NoProfile -File tests/verify-command-adapter.ps1
 
+      # 回写层自测：preview-first 默认零写入、幂等键确定性/敏感性、重放与内容去重不写、
+      # 失败面（写手报失败/非 JSON/漏报 -> exit 1 且失败行不入账；账本损坏 -> exit 2）。
+      # 离线：digest / state / ledger / 写手替身全在 %TEMP% 现造，无凭据无网络。
+      - name: writeback plan self-test (preview-first + idempotency)
+        shell: pwsh
+        run: pwsh -NoProfile -File tests/verify-writeback-plan.ps1
+
       - name: Secret hygiene gate
         shell: pwsh
         run: pwsh -NoProfile -File tests/verify-no-secrets.ps1
