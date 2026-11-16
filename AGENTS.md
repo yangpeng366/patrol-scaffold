@@ -108,6 +108,7 @@ pwsh -NoProfile -File tests/verify-provider-isolation.ps1      # 同名函数不
 pwsh -NoProfile -File tests/verify-csv-file-adapter.ps1        # csv-file 自测
 pwsh -NoProfile -File tests/verify-command-adapter.ps1          # command 自测
 pwsh -NoProfile -File tests/verify-writeback-plan.ps1           # 回写层：preview-first + 幂等键 + provider 双门组合（51 条断言）
+pwsh -NoProfile -File tests/verify-doc-gate-claims.ps1          # 双门口径漂移：文案不许重新长出 -SyncBack（19 条断言）
 pwsh -NoProfile -File tests/verify-tencent-docs-adapter.ps1     # 腾讯文档 mock 自测
 pwsh -NoProfile -File tests/verify-no-secrets.ps1               # 密钥卫生
 pwsh -NoProfile -File tests/verify-item-contract-parity.ps1     # 跨仓静态同源

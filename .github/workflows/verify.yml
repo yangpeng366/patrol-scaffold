@@ -126,6 +126,12 @@ jobs:
         shell: pwsh
         run: pwsh -NoProfile -File tests/verify-writeback-plan.ps1
 
+      # 双门口径漂移闸门：实现签名用 AST 钉（bitable 没有 -SyncBack），散文口径逐段扫，
+      # 并自带「历史漂移原文必红 / 改正后必绿」成对自证，避免闸门自己是空转的。
+      - name: doc gate-claims drift
+        shell: pwsh
+        run: pwsh -NoProfile -File tests/verify-doc-gate-claims.ps1
+
       - name: Secret hygiene gate
         shell: pwsh
         run: pwsh -NoProfile -File tests/verify-no-secrets.ps1

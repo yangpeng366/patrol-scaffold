@@ -40,6 +40,18 @@
   同一 digest 重放 `replay=1`，不再调能力槽。门禁已挂进
   `.github/workflows/verify.yml`（`writeback plan self-test`）。
 
+- **`tests/verify-doc-gate-claims.ps1`：把「双门散文口径」也变成会红的闸门（19 条断言，零凭据零网络）。**
+  上一轮修掉的是幽灵开关本身，挡不住同一个谎再写一遍：描述文件层的键名漂移有 `verify-adapter-spec.ps1` 的
+  `E-ARGNAME` 兜着（args 键 ⊆ 函数具名参数），但 README / SKILL / AGENTS / CHANGELOG / references / adapters
+  里的散文没人守，别写成「受 `sync_back` + 显式 `-SyncBack` 双门控制」——那样测试仍全绿。现在：①用 PowerShell AST
+  钉住 `Sync-BitableRoundResult` 的具名参数必须恰好是 `BitableConfigPath` / `Item` / `Identity`；②按段落/表格行
+  扫 20 份文档与描述文件，凡「提 bitable 又提 `-SyncBack` 且无否定词」即判红（表格行各自成段，否定词不外溢；
+  明确归给 tencent-docs 的句子不误伤）；③自证不空转——两段历史漂移原文（`45f269d` 的模块头注释与 README 行，
+  都不含函数名，正是「只匹配函数名会放过真凶」的证据）必须判红、改正后同一句必须判绿；④拿 tencent-docs 真声明的
+  `Save-PatrolItems -SyncBack` 与描述文件 `${syncBack}` 映射做正例，证明规则只咬 bitable。实测把旧文案粘回
+  README 末尾 → `fail=1 exit=1`，`git checkout` 还原后 19/19 绿。已挂进 `.github/workflows/verify.yml`
+  （`doc gate-claims drift`）与 `AGENTS.md` 离线清单、`SKILL.md` 测试清单。
+
 - **`tests/verify-bitable-live.ps1`：可选的 bitable 只读实跑闸门（默认离线 SKIP）。** 默认（不带 `-Live`）只跑两条离线自测——分页边界（`next_offset` 缺失时按本页行数推进，推进不了即报错判红，绝不空转）与 `lark-cli` 非零退出透传（mock `exit=23` 与真实 `.cmd` `exit /b 23` 两条）——再对真读打印 `SKIP` 并 `exit 0`，所以 CI 无凭据也不判红。`-Live` 用 `lark-cli base +record-list --as user` 只读方向表：实测 78 行、2 页分页（offset 0,50）、逐行 `Convert-BitableRowToItem` + `ConvertTo-PatrolItem` 归一 78/78，其中在跑 12 行、停跑 66 行（`intervalMin=0` 即停跑）。只读边界：user OAuth 只需 `base:record:read`，只调 `+record-list`，绝不调 `+record-upsert` / `+record-batch-*` / `+record-delete`；写回留待人工批准单独一轮。
 - **门禁入口已挂上**：`.github/workflows/verify.yml` 新增 `bitable live gate (default SKIP without credentials)`（走默认路径，不带 `-Live`）；`README.md` 增「Bitable 只读实跑闸门（可选，默认 SKIP）」一节；`docs/adapting-a-provider.md` §8.1、`docs/releasing.md` §1/§5 同步口径；`AGENTS.md` §7.4 补三条实测（真读口径 / 分页不前进判红 / 非零退出透传）与最小权限边界。
 
