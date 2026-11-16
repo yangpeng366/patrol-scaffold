@@ -104,8 +104,10 @@
 }
 ```
 
-带能力槽的样例见 `adapters/bitable.adapter.json`：`optional.syncBack` 把 `Sync-BitableRoundResult` 挂上，
-`config.sync_back`（读取方在外部 helper 里）与显式 `-SyncBack` 双门才真写远端。
+带能力槽的样例见 `adapters/bitable.adapter.json`：`optional.syncBack` 把 `Sync-BitableRoundResult` 挂上。
+它的双门是「描述文件声明 `optional.syncBack`」（装配层判，缺槽即零调用）与「外部配置 `sync_back=true`」
+（模块自己判，关着就 `return $false`）。`Sync-BitableRoundResult` **没有** `-SyncBack` 参数，人工显式触发
+在上游 `scripts/patrol-writeback.ps1 -Apply`（默认 preview，零远端写入、不建账本）。
 
 ---
 
@@ -390,7 +392,11 @@ digest 里 `method` 必须等于 provider 名（取自 `$AdapterName`，不是�
    5.1 按 ANSI 解码会直接解析失败——这不是兼容性问题，是「只支持 pwsh 7」的声明，别加 BOM 去迁就。
 2. **路径**：描述文件里不出现本机绝对路径；`config` 默认值要可移植。
 3. **凭据**：不落仓。凭据走环境变量或仓库外密钥文件；`needsCredentials=true`；写回默认关，
-   要「配置开 + 显式开」双门（参考 `tencent-docs` 的 `config.syncBack` 与 `-SyncBack`）。
+   双门缺一不可：**能力声明门**（描述文件写了 `optional.syncBack`）+ **配置门**（外部配置里的开关）。
+   「显式开」的落点有两种形态，别混着写：`tencent-docs` 把它做成函数参数 `-SyncBack`
+   （描述文件 `args.SyncBack = "${syncBack}"`，与配置 `config.syncBack` 一起判）；`bitable` 只判配置
+   `sync_back`，人工显式触发在上游 `patrol-writeback.ps1 -Apply`，函数签名里**没有** `-SyncBack`。
+   函数没有那个参数，就不要在文档/描述文件里声称有。
 4. **只读**：`list-items()` 不得改源；`write-back()` 只在被调用时写，且只写非空字段。
    Correlator 只读 `git status/log`，不 commit/push。
 

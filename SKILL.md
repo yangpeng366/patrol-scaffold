@@ -148,7 +148,14 @@ to parse. Judge reds by pwsh 7 only.
 
 ## Safety (non-negotiable)
 
-- READ-ONLY in the source system unless sync-back is explicitly enabled.
+- READ-ONLY in the source system unless sync-back is explicitly enabled. Two gates, both
+  required: **gate A** = the descriptor declares `optional.syncBack` (capability gate,
+  enforced by `scripts/patrol-provider.ps1`; missing slot -> the slot function is never
+  called); **gate B** = the provider's external config turns it on (`bitable`:
+  `sync_back=true`; `tencent-docs`: `config.syncBack` + `Save-PatrolItems -SyncBack`).
+  The explicit human trigger is one layer up: `scripts/patrol-writeback.ps1 -Apply`
+  (default prints a plan only). `Sync-BitableRoundResult(BitableConfigPath, Item, Identity)`
+  has **no** `-SyncBack` parameter — do not claim it has one.
 - 密钥卫生（最小纪律，本仓强制）：密钥只从环境变量（如 `$env:TYPESAFE_API_KEY`）或仓库外的
   密钥文件读（`~/.openclaw/secrets/typesafe.key` 一类）；仓内任何位置——SKILL.md /
   references / scripts / tests / fixtures——不得出现明文。提交前跑

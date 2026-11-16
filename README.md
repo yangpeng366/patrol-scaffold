@@ -106,7 +106,7 @@ pwsh -File patrol-loop.ps1 -TasksFile sample-tasks.json -Once -DryRun
 | `command` | cli | 无 / 无（mock 命令随仓） | **PASS**（3 行） | `verify-command-adapter.ps1` 45 条断言 | 只写本地镜像 `state/command-mirror.json`，源永远只读 |
 | `csv-file` | file | 无 / 无 | **PASS**（3 行） | `verify-csv-file-adapter.ps1` 43 条断言 | 只改目标行的指定列，其余字节保留 |
 | `local-json` | file | 无 / 无 | **PASS** | `verify-provider-isolation.ps1` + dry-run | 写回任务 JSON（demo 链路不调用，源只读） |
-| `bitable` | cli | 需要（`lark-cli` + config）/ 需要 | **SKIP** | 行映射离线对拍 `tests/verify-item-parity-e2e.ps1`（对兄弟仓 TypeScript 原码，需 node + dsh-patrol 克隆）；可选实跑 `tests/verify-bitable-live.ps1`（默认离线 SKIP，`-Live` 真读方向表 78 行并逐行归一）；`tests/verify-bitable-adapter.ps1` 是本地业务扩展，不入仓；`tests/record-bitable-golden.ps1` 可重采脱敏黄金样本（`tests/fixtures/`，同样不入仓）并喂给该对拍 | 受 `sync_back` + 显式 `-SyncBack` 双门控制 |
+| `bitable` | cli | 需要（`lark-cli` + config）/ 需要 | **SKIP** | 行映射离线对拍 `tests/verify-item-parity-e2e.ps1`（对兄弟仓 TypeScript 原码，需 node + dsh-patrol 克隆）；可选实跑 `tests/verify-bitable-live.ps1`（默认离线 SKIP，`-Live` 真读方向表 78 行并逐行归一）；`tests/verify-bitable-adapter.ps1` 是本地业务扩展，不入仓；`tests/record-bitable-golden.ps1` 可重采脱敏黄金样本（`tests/fixtures/`，同样不入仓）并喂给该对拍 | 受「描述文件 `optional.syncBack` + 配置 `sync_back`」双门控制；`Sync-BitableRoundResult` **没有** `-SyncBack` 参数，人工显式触发是 `scripts/patrol-writeback.ps1 -Apply`（默认 preview 零远端写入） |
 | `tencent-docs` | api | 需要（开放平台凭据）/ 需要 | **SKIP** | `verify-tencent-docs-adapter.ps1` 本地 mock，14 条断言 | 默认只落镜像；配置 + 显式开关才写远端 |
 
 **SKIP 的判据只有一个**：`needsCredentials=true` 且 `configPath` 展开为空 → 跳过「真实 `list-items()` 实跑」。

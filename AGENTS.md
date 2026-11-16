@@ -92,6 +92,8 @@ pwsh -NoProfile -File scripts/build-release.ps1 -IncludeUntracked
 
 **item 契约字段名**：`id`、`title`、`repoPath`、`description`、`nextStep`、`priority`（P0/P1/P2）、`intervalMin`（int，0 = 停跑）、`threadId`、`fake`、`lastRun`（ISO 串）、`currentStage`、`achievement`、`actionType`；`additionalProperties: true`，额外字段原样保留。
 
+**写回双门口径（别写成 `-SyncBack`）**：能力槽函数不靠自身参数开关。门 A = 描述文件是否声明 `optional.syncBack`（`scripts/patrol-provider.ps1::Sync-PatrolProviderRoundResult` 判，缺槽返回 `$false`、函数根本不被调用）；门 B = provider 外部配置（`bitable` 是 `sync_back=true`，`tencent-docs` 是 `config.syncBack` 且 `Save-PatrolItems -SyncBack`）。人工显式触发统一在上游 `scripts/patrol-writeback.ps1 -Apply`（默认只打印计划）。所以 `Sync-BitableRoundResult(BitableConfigPath, Item, Identity)` 里**没有**、也不该声称有 `-SyncBack`；四象限负例已钉在 `tests/verify-writeback-plan.ps1` §9。
+
 **离线自测命令清单**（全部无凭据、无网络，可直接进 CI）：
 
 ```powershell

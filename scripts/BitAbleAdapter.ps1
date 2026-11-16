@@ -6,11 +6,20 @@
 #   Resolve-ItemName      resolve-name()
 #
 # Note: This adapter is opt-in and dry-run-first. It reads Bitable rows via
-# lark-cli base, normalizes them into the common item shape, and writes the
-# worker result back via lark-cli base +record-upsert when -SyncBack is set.
+# lark-cli base, normalizes them into the common item shape, and (through the
+# `optional.syncBack` capability slot) upserts the worker result back via
+# lark-cli base +record-upsert.
 #
-# All Bitable writes are gated by both config (`sync_back=true`) AND CLI flag
-# (`-SyncBack`). Default behavior is read-only + dry-run-friendly.
+# All Bitable writes need BOTH gates:
+#   gate A = the descriptor declares `optional.syncBack` (checked by
+#            scripts/patrol-provider.ps1::Sync-PatrolProviderRoundResult;
+#            no slot -> return $false, the function is never called);
+#   gate B = the external config carries `sync_back = true` (checked inside
+#            Sync-BitableRoundResult below; false -> return $false).
+# There is NO `-SyncBack` parameter in this module. The human-explicit trigger
+# lives one layer up: `scripts/patrol-writeback.ps1 -Apply` (default is a
+# preview plan: zero network, zero remote writes, no ledger).
+# Default behavior is read-only + dry-run-friendly.
 
 $script:NoBom = [System.Text.UTF8Encoding]::new($false)
 
@@ -199,8 +208,11 @@ function Resolve-ItemName {
 }
 
 function Sync-BitableRoundResult {
-    # Optional write-back to Bitable for one item. Requires SyncBackEnabled
-    # in config and is otherwise a no-op.
+    # Optional write-back to Bitable for one item. Gate B only lives here:
+    # requires the external config key `sync_back` to be truthy, otherwise a
+    # no-op returning $false. Gate A (descriptor declares `optional.syncBack`)
+    # is enforced by the assembly layer before this function is ever called;
+    # the explicit human trigger is `patrol-writeback.ps1 -Apply`.
     param(
         [Parameter(Mandatory)][string]$BitableConfigPath,
         [Parameter(Mandatory)]$Item,

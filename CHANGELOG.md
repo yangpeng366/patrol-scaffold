@@ -115,6 +115,19 @@
 
 ### Fixed
 
+- **`bitable` 写回的「双门」口径更正：不存在 `-SyncBack` 参数**。`scripts/BitAbleAdapter.ps1` 头注释、
+  `adapters/bitable.adapter.json` 的 `description`、`README.md` 的 provider 表格（以及
+  `references/adding-a-provider.md` 两处）此前都写「受 `config.sync_back` + 显式 `-SyncBack` 双门控制」，
+  但 `Sync-BitableRoundResult` 的真实签名只有 `BitableConfigPath` / `Item` / `Identity`——`-SyncBack`
+  从首个提交 `3be8afa` 起就从未存在（`git show 3be8afa:scripts/BitAbleAdapter.ps1` 可核），是文案从
+  旧实现带过来的幽灵开关。真实双门按已落地的实现写清：门 A = 描述文件声明 `optional.syncBack`
+  （`patrol-provider.ps1` 判，缺槽零调用），门 B = 配置 `sync_back=true`（模块自判）；人工显式触发是
+  上游 `patrol-writeback.ps1 -Apply`（默认 preview）。口径同步进 `AGENTS.md` §6、`SKILL.md` Safety、
+  `references/adding-a-provider.md` §2/§9，并把 `tencent-docs`（确实有 `-SyncBack` 参数）与 `bitable`
+  （没有）两种合法形态分开写明，避免下次再把「显式开」笼统写成 CLI 开关。
+  未改代码行为：`tests/verify-writeback-plan.ps1` 的 51 条断言仍全绿，§9 的四象限（能力声明门 × 配置门）
+  本来测的就是这两道门。
+
 - **`巡检间隔(分钟) = 0` 不再被解析层改写成 60**。原实现 `if ($interval -le 0) { $interval = 60 }` 会让
   行在解析阶段就变成 60 分钟一轮（静默降频），且与 dsh 的 `normalizeItem`（保留 0）不同形。
   现在解析层如实保留 `0`，调度层也不再回退（`0` / 空 / 负数 = 停跑），全链路一个口径。

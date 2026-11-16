@@ -5,7 +5,7 @@
   "kind": "cli",
   "needsCredentials": true,
   "needsNetwork": true,
-  "description": "用 lark-cli base --as user 读多维表格行并归一为 item；写回由 Sync-BitableRoundResult 承担（需 config.sync_back=true 且显式 -SyncBack）。",
+  "description": "用 lark-cli base --as user 读多维表格行并归一为 item；写回由 Sync-BitableRoundResult 承担，需双门：描述文件声明 optional.syncBack（装配层判）且 config.sync_back=true（模块自判）。该函数无 -SyncBack 参数，人工显式触发在 scripts/patrol-writeback.ps1 -Apply（默认 preview 零远端写入）。",
   "config": {
     "configPath": "",
     "identity": "user",
