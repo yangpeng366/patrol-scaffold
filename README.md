@@ -193,6 +193,14 @@ pwsh -NoProfile -File tests/verify-disabled-scheduling.ps1   # 停跑语义：13
 自证闸门不会说谎——去掉 `<=0` 跳过、恢复旧口径 `<=0 -> 60`、把 `lastRun` 空改成不派发，三种改坏都必须判红
 并点名到具体断言。
 
+运行时对了还不够，散文也得守：`tests/verify-interval-zero-claims.ps1` 把「实现事实 + 文档口径」一起钉——
+AST 断言调度层与契约层都没有默认间隔回退，再按段落/表格行/示例数据逐句扫；凡把 `0` 写成「每轮都跑」
+的句子判红（`旧实现` / `兄弟仓` 这类标注不误伤），并自带「旧口径原文必红 / 改正后必绿」成对自证：
+
+```powershell
+pwsh -NoProfile -File tests/verify-interval-zero-claims.ps1   # 37 条断言
+```
+
 跑不通先修 pwsh / 路径——链路跑不通之前，架构读了也白读。跑通后再读 `references/patrol-blueprint.md` 理解架构、`references/local-json-adapter.md` 换真实数据源。
 
 ## 新增 provider 的验收命令

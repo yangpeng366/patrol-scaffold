@@ -46,7 +46,7 @@ $all = @(
         intervalMin = 0
         priority    = 'P2'
         nextStep    = '固定版本号'
-        note        = 'interval=0 表示每轮都到期'
+        note        = 'interval=0 即停跑（不进 due）'
         repo        = ''
     }
 )

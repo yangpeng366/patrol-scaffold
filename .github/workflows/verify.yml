@@ -132,6 +132,12 @@ jobs:
         shell: pwsh
         run: pwsh -NoProfile -File tests/verify-doc-gate-claims.ps1
 
+      # 口径漂移闸门（第二道）：`interval=0` = 停跑 的散文守卫。AST 钉调度层/契约层没有默认间隔回退，
+      # 段落/表格行/示例数据逐句扫，自带「旧口径原文必红 / 改正后必绿」成对自证。
+      - name: interval-zero claims drift
+        shell: pwsh
+        run: pwsh -NoProfile -File tests/verify-interval-zero-claims.ps1
+
       - name: Secret hygiene gate
         shell: pwsh
         run: pwsh -NoProfile -File tests/verify-no-secrets.ps1

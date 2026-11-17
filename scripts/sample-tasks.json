@@ -3,7 +3,7 @@
     "id": "demo-A",
     "title": "示例项目A-紧急",
     "repoPath": "D:\\gitAll\\demo-a",
-    "description": "演示 P0 高优先，interval=0 视为每轮到期",
+    "description": "演示 P0 高优先，interval=0 即停跑（disabled，不进 due）",
     "nextStep": "跑通 dry-run",
     "priority": "P0",
     "intervalMin": 0,

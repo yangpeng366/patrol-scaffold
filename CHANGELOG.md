@@ -52,6 +52,23 @@
   README 末尾 → `fail=1 exit=1`，`git checkout` 还原后 19/19 绿。已挂进 `.github/workflows/verify.yml`
   （`doc gate-claims drift`）与 `AGENTS.md` 离线清单、`SKILL.md` 测试清单。
 
+- **`tests/verify-interval-zero-claims.ps1`：把「`interval=0` = 停跑」的散文口径也变成会红的闸门（37 条断言，零凭据零网络）。**
+  `verify-disabled-scheduling.ps1` 只钉运行时行为（喂 fixture 看 due/disabled 落点），挡不住散文把旧口径再写一遍。
+  本轮实测就扫出 4 处旧口径真漂移：`references/csv-file-adapter.md` 的触发间隔行仍写着「`interval=0` 回退 60 分钟，
+  与骨架一致」，`scripts/sample-tasks.csv` 与 `scripts/sample-tasks.json` 的示例说明把 0 说成每轮都到期，
+  `tests/fixtures/command/mock-jobs.ps1` 的 note 同样——读者照着做就是「已停项目每 60 分钟被唤醒一次」。
+  本仓口径是「0 / 空 / 缺列 / 负数 = 停跑（disabled），绝不回退默认间隔」，示例数据本身就是反例
+  （demo-A / demo-C 是 `due=1/3 disabled=2` 里的停跑行），文案与行为必须同口径。现在：①用 PowerShell AST 钉
+  实现事实——`Get-PatrolDueSelection` 必须显式比较 0、把停跑行收进 `disabled`、函数体里没有 `= 60`；
+  `Convert-BitableRowToItem` 必须把缺列/非法归 `0`；`patrol-loop.ps1` 必须走同一函数、不自己算间隔；
+  ②扫 24 份受控文件（本机另有 1 份 gitignored 的 `docs/jev-shadow.md` 一并扫），双粒度——「提 interval 0 又说
+  每轮到期」按句子判（同段落里先描述旧实现、紧接新长出一句旧口径仍判红），「回退 60 / 当最短间隔」按段落/行判
+  （`旧实现` / `兄弟仓 dsh-patrol` 标注不误伤，表格相邻行的否定词不外溢）；③自证不空转——5 段旧口径原文
+  （逐字取自上述真漂移 + 一句三元兜底）必须判红，5 句改正后文案（含「从每轮到期改为停跑」）必须判绿；
+  ④不一刀切——兄弟仓的 `<=0 -> 60` 是刻意保留的差异，讲它的句子必须绿；「`lastRun` 空 = 到期」不是停跑，不许误判。
+  实测把旧口径贴回 `docs/releasing.md` → `fail=1 exit=1`，`git checkout` 还原后 37/37 绿。已挂进
+  `.github/workflows/verify.yml`（`interval-zero claims drift`）与 `AGENTS.md` / `README.md` / `SKILL.md` 清单。
+
 - **`tests/verify-bitable-live.ps1`：可选的 bitable 只读实跑闸门（默认离线 SKIP）。** 默认（不带 `-Live`）只跑两条离线自测——分页边界（`next_offset` 缺失时按本页行数推进，推进不了即报错判红，绝不空转）与 `lark-cli` 非零退出透传（mock `exit=23` 与真实 `.cmd` `exit /b 23` 两条）——再对真读打印 `SKIP` 并 `exit 0`，所以 CI 无凭据也不判红。`-Live` 用 `lark-cli base +record-list --as user` 只读方向表：实测 78 行、2 页分页（offset 0,50）、逐行 `Convert-BitableRowToItem` + `ConvertTo-PatrolItem` 归一 78/78，其中在跑 12 行、停跑 66 行（`intervalMin=0` 即停跑）。只读边界：user OAuth 只需 `base:record:read`，只调 `+record-list`，绝不调 `+record-upsert` / `+record-batch-*` / `+record-delete`；写回留待人工批准单独一轮。
 - **门禁入口已挂上**：`.github/workflows/verify.yml` 新增 `bitable live gate (default SKIP without credentials)`（走默认路径，不带 `-Live`）；`README.md` 增「Bitable 只读实跑闸门（可选，默认 SKIP）」一节；`docs/adapting-a-provider.md` §8.1、`docs/releasing.md` §1/§5 同步口径；`AGENTS.md` §7.4 补三条实测（真读口径 / 分页不前进判红 / 非零退出透传）与最小权限边界。
 
