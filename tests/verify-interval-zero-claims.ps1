@@ -21,6 +21,11 @@
          表格相邻行的否定词不许外溢；`lastRun` 空 = 到期（不是停跑）不许误判
       5) 必须写的口径：入口文档 / schema / 示例数据都要写清 0 = 停跑（不能只写「0 特殊」）
 #>
+param(
+    # 默认扫描面 = 受控文件集（git 跟踪、CI checkout 也看得见的那些）。
+    # 带此开关才把本机 gitignored 的本地扩展也拉进扫描面（CI 不复现，只作本机观察）。
+    [switch]$IncludeLocalExtensions
+)
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $pass = 0; $fail = 0
@@ -32,6 +37,27 @@ function Assert-True {
         if (-not [string]::IsNullOrWhiteSpace($Detail)) { Write-Host "     $Detail" }
         $script:fail++
     }
+}
+
+# 扫描面纪律：默认只扫「受控文件集」——git 跟踪、CI checkout 里也存在的文件。
+# 本机 gitignored 的本地扩展默认排除，否则同一提交会出现「本机多扫一份 / CI 少扫一份」两个口径。
+function Get-GitIgnoredPaths {
+    param([string]$Root, [string[]]$Paths)
+    $set = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    if ($null -eq (Get-Command git -ErrorAction SilentlyContinue)) { return , $set }
+    if (@($Paths).Count -eq 0) { return , $set }
+    $inside = & git -C $Root rev-parse --is-inside-work-tree 2>$null
+    if ($LASTEXITCODE -ne 0 -or "$inside".Trim() -ne 'true') { return , $set }
+    $rel = @($Paths | ForEach-Object { [System.IO.Path]::GetRelativePath($Root, $_).Replace('\', '/') })
+    # 走 argv 而不是 --stdin：PowerShell 拼 stdin 会给最后一行带上 \r，造出幽灵命中。
+    $hits = @(& git -C $Root check-ignore -- @rel 2>$null)
+    if ($LASTEXITCODE -notin 0, 1) { return , $set }
+    foreach ($h in $hits) {
+        if ([string]::IsNullOrWhiteSpace($h)) { continue }
+        $full = [System.IO.Path]::GetFullPath((Join-Path $Root ($h.Trim().Replace('/', '\'))))
+        [void]$set.Add($full)
+    }
+    return , $set
 }
 
 function Get-FunctionBodyText {
@@ -150,6 +176,13 @@ try {
         }
     }
     $docSpecs = @($docSpecs | Where-Object { Test-Path -LiteralPath $_.Path })
+    $rawSpecs = @($docSpecs)
+    $gitIgnored = Get-GitIgnoredPaths -Root $repoRoot -Paths @($rawSpecs | ForEach-Object { $_.Path })
+    if (-not $IncludeLocalExtensions -and $gitIgnored.Count -gt 0) {
+        $docSpecs = @($docSpecs | Where-Object { -not $gitIgnored.Contains([System.IO.Path]::GetFullPath($_.Path)) })
+        $skipped = @($rawSpecs | Where-Object { $gitIgnored.Contains([System.IO.Path]::GetFullPath($_.Path)) } | ForEach-Object { [System.IO.Path]::GetRelativePath($repoRoot, $_.Path) })
+        Write-Host ('NOTICE 扫描面按受控文件集收口，跳过 {0} 份 gitignored 本地扩展：{1}' -f $skipped.Count, ($skipped -join ', '))
+    }
     Assert-True ($docSpecs.Count -ge 15) ('2) 扫描面覆盖 {0} 份文档/描述文件/示例数据' -f $docSpecs.Count)
 
     $claims = @()
@@ -241,6 +274,16 @@ try {
         $t = [System.IO.File]::ReadAllText($p, [System.Text.UTF8Encoding]::new($false))
         $missing = @($m.Patterns | Where-Object { $t -notmatch [regex]::Escape($_) })
         Assert-True ($missing.Count -eq 0) ('5) {0} 写清了 0 = 停跑（缺 {1}）' -f $m.Path, ($missing -join ','))
+    }
+
+    # ---- 6) 扫描面 = 受控文件集（本机与 CI 同源）----
+    if ($IncludeLocalExtensions) {
+        Assert-True $true ('6) 本轮带 -IncludeLocalExtensions：gitignored 本地扩展按 opt-in 入面（{0} 份），CI 不复现' -f $gitIgnored.Count)
+    } elseif ($gitIgnored.Count -eq 0) {
+        Assert-True $true '6) 本副本无 gitignored 本地扩展：扫描面即磁盘全量，与 CI 一致（无可排除）'
+    } else {
+        $leak = @($docSpecs | Where-Object { $gitIgnored.Contains([System.IO.Path]::GetFullPath($_.Path)) })
+        Assert-True ($leak.Count -eq 0) ('6) 扫描面不含 gitignored 本地扩展（排除 {0} 份，泄漏 {1} 份）' -f $gitIgnored.Count, $leak.Count)
     }
 } catch {
     $fail++

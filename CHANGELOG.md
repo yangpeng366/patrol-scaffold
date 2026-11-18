@@ -13,6 +13,12 @@
 本轮追加主题：**`巡检间隔 = 0` 从「每轮到期」改为「停跑」**——表数据早就这么用（0 值行普遍写
 「停跑 / 停用 / 只读留档」），但调度层仍把 `<=0` 回退成 60，等于每 60 分钟把已停项目唤醒一次。
 
+再追加主题：**两道口径散文闸门的扫描面收口到「受控文件集」**。它们原来按目录递归扫 `docs/` > `references/` >
+`adapters/`，于是本机 gitignored 的本地扩展（如 `docs/jev-shadow.md`）也被扫进去：同一提交在本机扫
+20/25 份、在 CI 只扫 19/24 份，出现「本机绿 / CI 不可复现」两个口径。现在默认按 `git check-ignore`
+排除 gitignored 路径（命中时打 `NOTICE` 点名），扫描面与 CI 字节级同源；本机想连扩展一起看，
+显式加 `-IncludeLocalExtensions`（opt-in，不参与 CI 判定）。非 git 副本（已安装 skill 目录）退化为磁盘全量。
+
 ### Added
 
 - **`scripts/patrol-writeback.ps1`：回写层落地，默认 preview（零远端写入）+ 幂等键 + 可重放账本。**

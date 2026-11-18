@@ -53,9 +53,11 @@ pwsh -NoProfile -File tests/verify-adapter-spec.ps1
 pwsh -NoProfile -File tests/verify-disabled-scheduling.ps1
 #   → summary pass=13 fail=0 + summary selftest fail=0 + RESULT: PASS
 
-# 口径散文闸门：`interval=0 = 停跑` 的文档守卫（37 条断言：实现事实 + 散文扫描 + 旧口径原文必红/改正必绿）
+# 口径散文闸门：`interval=0 = 停跑` 的文档守卫（38 条断言：实现事实 + 散文扫描 + 旧口径原文必红/改正必绿）
+#   扫描面默认 = 受控文件集（磁盘全量减去 gitignored 本地扩展），与 CI 同源；
+#   要连本机 gitignored 扩展一起扫：追加 -IncludeLocalExtensions（CI 不复现，仅本机观察）。
 pwsh -NoProfile -File tests/verify-interval-zero-claims.ps1
-#   → summary pass=37 fail=0 + RESULT: PASS
+#   → summary pass=38 fail=0 + RESULT: PASS
 
 # 提示词决策层自测：提示词契约 + 解析器行为（不联网、不调模型、零凭据）
 pwsh -NoProfile -File tests/verify-decision-prompt.ps1
@@ -112,7 +114,7 @@ pwsh -NoProfile -File tests/verify-provider-isolation.ps1      # 同名函数不
 pwsh -NoProfile -File tests/verify-csv-file-adapter.ps1        # csv-file 自测
 pwsh -NoProfile -File tests/verify-command-adapter.ps1          # command 自测
 pwsh -NoProfile -File tests/verify-writeback-plan.ps1           # 回写层：preview-first + 幂等键 + provider 双门组合（51 条断言）
-pwsh -NoProfile -File tests/verify-doc-gate-claims.ps1          # 双门口径漂移：文案不许重新长出 -SyncBack（19 条断言）
+pwsh -NoProfile -File tests/verify-doc-gate-claims.ps1          # 双门口径漂移：文案不许重新长出 -SyncBack（20 条断言，同样默认只扫受控文件集）
 pwsh -NoProfile -File tests/verify-tencent-docs-adapter.ps1     # 腾讯文档 mock 自测
 pwsh -NoProfile -File tests/verify-no-secrets.ps1               # 密钥卫生
 pwsh -NoProfile -File tests/verify-item-contract-parity.ps1     # 跨仓静态同源
