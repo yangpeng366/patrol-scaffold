@@ -75,6 +75,20 @@
   实测把旧口径贴回 `docs/releasing.md` → `fail=1 exit=1`，`git checkout` 还原后 37/37 绿。已挂进
   `.github/workflows/verify.yml`（`interval-zero claims drift`）与 `AGENTS.md` / `README.md` / `SKILL.md` 清单。
 
+- **`tests/verify-scan-scope-selfproof.ps1`：给「扫描面收口」补仓内成对自证（19 条断言，%TEMP% 现造 git 仓，零凭据零网络）。**
+  上一轮把两道口径闸门的扫描面收口到「受控文件集」，但证据只有本机凑巧存在的那份 `docs/jev-shadow.md`：
+  干净机器（CI）上两道闸门都走「无可排除」分支，于是排除逻辑写错的两个方向——排过头、压根没排——都仍然全绿。
+  本轮把「排除真生效」本身变成可复现的断言：①按 `git ls-files` 把 64 份受控文件复制进 `%TEMP%` 现造的 git 仓，
+  用 `git add -Af` + commit 落地（裸 `add -A` 会漏掉 `tests/fixtures/` 下两份「已跟踪但被 .gitignore 盖住」的文件，
+  临时仓受控集就只剩 62 份，闸门的「排除 N 份」随之失真——这条也是本轮跑出来的真发现）；②写一份被
+  `.git/info/exclude` 挡住的漂移样本，样本里同时抄着两道闸门各自认得的历史漂移原文（幽灵写回开关一段 +
+  `intervalMin` 被回退成默认间隔一段）；
+  ③两道闸门各跑三段：A 默认必绿且打出 `NOTICE … 跳过 1 份 … local-extension-sample`，B `-IncludeLocalExtensions`
+  必红且点名样本，C 把样本 `git add -f` 提成受控后再默认跑必红、且不再打 NOTICE（反证 A 的绿来自收口，
+  而不是扫描器瞎了）。变异实测两个方向：把默认排除改成恒不生效 → A 段红（`FAIL 6) … 泄漏 1 份`）；
+  改成连 `docs/` 全排（排过头）→ A 段的 NOTICE 断言与 C 段同时红。已挂进 `.github/workflows/verify.yml`
+  （`scan-scope self-proof`）与 `AGENTS.md` 离线清单、`SKILL.md` 测试清单。
+
 - **`tests/verify-bitable-live.ps1`：可选的 bitable 只读实跑闸门（默认离线 SKIP）。** 默认（不带 `-Live`）只跑两条离线自测——分页边界（`next_offset` 缺失时按本页行数推进，推进不了即报错判红，绝不空转）与 `lark-cli` 非零退出透传（mock `exit=23` 与真实 `.cmd` `exit /b 23` 两条）——再对真读打印 `SKIP` 并 `exit 0`，所以 CI 无凭据也不判红。`-Live` 用 `lark-cli base +record-list --as user` 只读方向表：实测 78 行、2 页分页（offset 0,50）、逐行 `Convert-BitableRowToItem` + `ConvertTo-PatrolItem` 归一 78/78，其中在跑 12 行、停跑 66 行（`intervalMin=0` 即停跑）。只读边界：user OAuth 只需 `base:record:read`，只调 `+record-list`，绝不调 `+record-upsert` / `+record-batch-*` / `+record-delete`；写回留待人工批准单独一轮。
 - **门禁入口已挂上**：`.github/workflows/verify.yml` 新增 `bitable live gate (default SKIP without credentials)`（走默认路径，不带 `-Live`）；`README.md` 增「Bitable 只读实跑闸门（可选，默认 SKIP）」一节；`docs/adapting-a-provider.md` §8.1、`docs/releasing.md` §1/§5 同步口径；`AGENTS.md` §7.4 补三条实测（真读口径 / 分页不前进判红 / 非零退出透传）与最小权限边界。
 

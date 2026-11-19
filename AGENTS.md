@@ -59,6 +59,12 @@ pwsh -NoProfile -File tests/verify-disabled-scheduling.ps1
 pwsh -NoProfile -File tests/verify-interval-zero-claims.ps1
 #   → summary pass=38 fail=0 + RESULT: PASS
 
+# 扫描面收口自证：%TEMP% 现造 git 仓 + gitignored 漂移样本，两道口径闸门各跑三段
+#   A 默认必绿（样本被 git check-ignore 排除，NOTICE 点名）/ B 带 -IncludeLocalExtensions 必红 /
+#   C 样本 git add -f 提成受控后默认必红——反证「默认绿」来自收口而不是扫描器瞎
+pwsh -NoProfile -File tests/verify-scan-scope-selfproof.ps1
+#   → summary pass=19 fail=0 + RESULT: PASS
+
 # 提示词决策层自测：提示词契约 + 解析器行为（不联网、不调模型、零凭据）
 pwsh -NoProfile -File tests/verify-decision-prompt.ps1
 #   → summary pass=27 fail=0

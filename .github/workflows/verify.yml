@@ -138,6 +138,13 @@ jobs:
         shell: pwsh
         run: pwsh -NoProfile -File tests/verify-interval-zero-claims.ps1
 
+      # 扫描面收口自证：%TEMP% 现造 git 仓（受控文件按 git ls-files 复制）+ 一份 gitignored 漂移样本，
+      # 两道口径闸门各跑三段：默认必绿并点名被排除的样本 / -IncludeLocalExtensions 必红 / 样本提成受控后
+      # 默认必红（反证「绿」来自收口而不是扫描器瞎）。两个方向都钉：排过头与压根没排都会红。
+      - name: scan-scope self-proof (default green / opt-in red / tracked red)
+        shell: pwsh
+        run: pwsh -NoProfile -File tests/verify-scan-scope-selfproof.ps1
+
       - name: Secret hygiene gate
         shell: pwsh
         run: pwsh -NoProfile -File tests/verify-no-secrets.ps1
