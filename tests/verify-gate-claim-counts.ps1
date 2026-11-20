@@ -1,34 +1,41 @@
 #requires -Version 7
 <#
-    tests/verify-gate-claim-counts.ps1 — 三道闸门「断言数」的机器对拍（离线，无凭据、无网络）。
+    tests/verify-gate-claim-counts.ps1 — 登记闸门「断言数」的机器对拍（离线，无凭据、无网络）。
 
-    背景：三道散文/扫描面闸门（doc-gate / interval-zero / scan-scope）的断言数只写在文档散文里
-    （README「N 条断言」、AGENTS「→ summary pass=N」、SKILL 条目），没有任何东西守它。上一轮正是靠人工
-    复跑才发现 doc-gate 写的是 19、实测 20（commit 29e39af 才校准）。人工对齐每加一条断言就要重来一次，
-    漏一次就又是一份「文档说 19、实测 20」的谎——而且测试全绿。
+    背景：凡是在文档散文里报了断言数的闸门，那些数字只写在散文里（README「N 条断言」、AGENTS「→ summary
+    pass=N」、SKILL 条目），没有任何东西守它。上一轮正是靠人工复跑才发现 doc-gate 写的是 19、实测 20
+    （commit 29e39af 才校准）。人工对齐每加一条断言就要重来一次，漏一次就又是一份「文档说 19、实测 20」的
+    谎——而且测试全绿。
+
+    登记面：一张表 `$gates` 说了算，加闸门只加一行。
+      - 散文/扫描面三兄弟：doc-gate / interval-zero / scan-scope
+      - 自带数字的离线闸门：disabled-scheduling / writeback-plan / command-adapter
+        （command-adapter 只打 `summary pass=N fail=0`、不打 `RESULT: PASS`，故表里如实登记 EmitsResult=false；
+        其余闸门有 RESULT 行就必须是 PASS）
 
     本脚本把这件事变成机器对拍，三件事，每件都成对自证：
 
-      1) 实测：子进程真跑三道闸门，解析 `summary pass=N fail=M`；必须 exit 0 / `RESULT: PASS` / fail=0
-      2) 对拍：扫入口文档（AGENTS / README / SKILL / docs / references），凡是给这三道闸门写了断言数的
+      1) 实测：子进程真跑表里登记的每一道闸门，解析 `summary pass=N fail=M`；必须 exit 0 / fail=0
+      2) 对拍：扫入口文档（AGENTS / README / SKILL / docs / references），凡是给登记闸门写了断言数的
          行、块、句子（`pass=N` 或 `N 条断言`），逐个必须等于本次实测 pass —— 不等就点名 file:line 判红
       3) 自证：陈旧数字必红 / 正确数字必绿 / `#   → summary` 结果行归属它上面那条命令 /
-         注释块里的数字归属它下面那条命令 / 兄弟闸门（如 verify-disabled-scheduling）的 13 条断言不许串味
+         注释块里的数字归属它下面那条命令 / 未登记兄弟闸门的数不许串味 / 一行两名不猜
 
     扫描面与归属规则（都是为了「谁的数算谁的」）：
       - 同一行里只出现一个闸门文件名 → 这行的数字算它的
-      - 自描述写法 `doc-gate=pass20` / `interval-zero=pass38` 名字就在数字旁 → 直接归属（不靠上下文）
+      - 自描述写法 `doc-gate=pass20` / `writeback-plan=pass51` 名字就在数字旁 → 直接归属（不靠上下文）
       - 行首是 `#` 且含 `→`（`#   → summary pass=38 fail=0` 这类结果行）→ 回溯最近的非注释行（命令）
       - 行首是 `#` 但只是说明（`# 口径散文闸门（38 条断言…）`）→ 前探最近的非注释行（命令）
       - 散文行（既无文件名也不在注释块里）→ 不归属，只打 NOTICE（不猜）
-      - 一行里出现多个闸门文件名 → 归属不明，打 NOTICE 不算证据（例外见 $orderedSites 的显式顺序表）
+      - 一行里出现多个闸门文件名 → 归属不明，打 NOTICE 不算证据（例外见 $orderedSites 的显式顺序表）；
+        若那行的名字全都不是登记闸门（如 csv-file / install-drift），静默跳过，不当归属不明
 
     CHANGELOG.md 不参与对拍：它是发布历史，冻结的是当时实测值，不随断言增减改写；仍在 NOTICE 里点名，
     让人一眼看见「这些历史数字不受本闸门保护」。
 
     用法：
       pwsh -NoProfile -File tests/verify-gate-claim-counts.ps1
-    退出码：0 = PASS；1 = 断言数漂移或闸门红；2 = 环境错误（找不到三道闸门之一）。
+    退出码：0 = PASS；1 = 断言数漂移或闸门红；2 = 环境错误（找不到登记闸门之一）。
 #>
 param(
     # 只看实测、不跑对拍（排查闸门本身时用；CI 与默认都走全量）。
@@ -52,14 +59,20 @@ function Assert-True {
     }
 }
 
-# 三道被对拍的闸门。Key 是文档里叫它的短名（判红时点名用），Script 是仓内相对路径。
+# 被对拍的闸门。Key 是文档里叫它的短名（判红时点名用），Script 是仓内相对路径。
+# EmitsResult=false 表示该闸门只打 `summary pass=N fail=M`、不打 `RESULT: PASS`（如实登记，不硬编特例）。
 $gates = @(
-    [pscustomobject]@{ Key = 'doc-gate'; Script = 'tests/verify-doc-gate-claims.ps1' }
-    [pscustomobject]@{ Key = 'interval-zero'; Script = 'tests/verify-interval-zero-claims.ps1' }
-    [pscustomobject]@{ Key = 'scan-scope'; Script = 'tests/verify-scan-scope-selfproof.ps1' }
+    [pscustomobject]@{ Key = 'doc-gate'; Script = 'tests/verify-doc-gate-claims.ps1'; EmitsResult = $true }
+    [pscustomobject]@{ Key = 'interval-zero'; Script = 'tests/verify-interval-zero-claims.ps1'; EmitsResult = $true }
+    [pscustomobject]@{ Key = 'scan-scope'; Script = 'tests/verify-scan-scope-selfproof.ps1'; EmitsResult = $true }
+    [pscustomobject]@{ Key = 'disabled-scheduling'; Script = 'tests/verify-disabled-scheduling.ps1'; EmitsResult = $true }
+    [pscustomobject]@{ Key = 'writeback-plan'; Script = 'tests/verify-writeback-plan.ps1'; EmitsResult = $true }
+    [pscustomobject]@{ Key = 'command-adapter'; Script = 'tests/verify-command-adapter.ps1'; EmitsResult = $false }
 )
 $gateByFile = @{}
 foreach ($g in $gates) { $gateByFile[(Split-Path -Leaf $g.Script)] = $g.Key }
+# 自描述写法的正则从表里生成：加闸门不用再改正则。
+$gateNamePattern = '(' + (($gates | ForEach-Object { [regex]::Escape($_.Key) }) -join '|') + ')=pass(\d+)'
 
 # 一句话里塞了多个数、没有文件名可归属的写法：显式登记「按出现顺序对应哪道闸门」，不靠猜。
 # 这种句子一旦重排数字顺序，本表就要跟着改——宁可判红让人看一眼，也不要默默对错。
@@ -131,6 +144,8 @@ function Find-NearestScriptNames {
         if ($t -match '^\s*$') { continue }
         if ($t -match '^\s*```') { continue }
         if ($t -match '^\s*#') { continue }
+        # 回溯/前探要看的是「那一行命令跑的是什么」，所以不限于 verify-*：
+        # 命中非登记脚本（如 adapter-contract-test）时交给调用方静默跳过，而不是误报「归属不明」。
         $m = [regex]::Matches($t, '[A-Za-z0-9_.-]+\.ps1')
         if ($m.Count -gt 0) { return @($m | ForEach-Object { $_.Value } | Sort-Object -Unique) }
     }
@@ -163,7 +178,7 @@ function Get-GateClaimsFromText {
         $lineNo = $i + 1
         if (@($orderedSites | Where-Object { $_.File -eq $Source -and $line.Contains($_.Anchor) }).Count -gt 0) { continue }
         # 自描述写法（`doc-gate=pass20` / `interval-zero=pass38`）：名字就在数字旁边，不需要靠上下文归属。
-        $named = @([regex]::Matches($line, '(doc-gate|interval-zero|scan-scope)=pass(\d+)'))
+        $named = @([regex]::Matches($line, $gateNamePattern))
         if ($named.Count -gt 0) {
             foreach ($m in $named) {
                 $claims += [pscustomobject]@{ Gate = $m.Groups[1].Value; Value = [int]$m.Groups[2].Value; Kind = $m.Value; Source = $Source; LineNo = $lineNo }
@@ -172,7 +187,8 @@ function Get-GateClaimsFromText {
         }
         $vals = @(Get-ClaimValues -Line $line)
         if ($vals.Count -eq 0) { continue }
-        $names = @([regex]::Matches($line, '[A-Za-z0-9_.-]+\.ps1') | ForEach-Object { $_.Value } | Sort-Object -Unique)
+        # 只看 `verify-*.ps1`（闸门命名约定）；同行提一句 `scripts/patrol-writeback.ps1` 这类配套脚本不算「第二名」
+        $names = @([regex]::Matches($line, 'verify-[A-Za-z0-9_.-]+\.ps1') | ForEach-Object { $_.Value } | Sort-Object -Unique)
         # 归属优先级：同行唯一文件名 > 结果行回溯上一条命令 > 说明注释前探下一条命令。
         # 必须 @(...) 包一层：函数返回单元素数组时 PowerShell 会退化成字符串，$scope[0] 就成了首个字符。
         $scope = @()
@@ -188,9 +204,16 @@ function Get-GateClaimsFromText {
         } elseif ($line -match '^\s*#') {
             $scope = @(Find-NearestScriptNames -Lines $lines -Index $i -Step 1)
         }
+        # $null 归一：Find-NearestScriptNames 找不到命令时返回 $null，直接 @($null) 会退化成一元数组，
+        # 后面 $gateByFile[$scope[0]] 就成了「用 $null 当索引」——整轮直接抛 Index operation failed。
+        $scope = @($scope | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
         if ($scope.Count -ne 1) {
             if ($scope.Count -gt 1 -and @($scope | Where-Object { $gateByFile[$_] }).Count -gt 0) {
                 $ambiguous += [pscustomobject]@{ Source = $Source; LineNo = $lineNo; Why = '归属到多脚本块'; Text = $line.Trim() }
+            }
+            elseif ($scope.Count -eq 0 -and $line -match '^\s*#') {
+                # 注释/结果行带数字，但上下 6 行里找不到命令可归属：不猜，点名让人补命令或改写法。
+                $ambiguous += [pscustomobject]@{ Source = $Source; LineNo = $lineNo; Why = '注释行附近找不到命令'; Text = $line.Trim() }
             }
             continue
         }
@@ -215,8 +238,10 @@ foreach ($g in $gates) {
     }
     $tail = (@(($run.Text -split "\r?\n") | Where-Object { $_.Trim() -ne '' }) | Select-Object -Last 2) -join ' / '
     $sum = Get-SummaryTuple -Text $run.Text
-    Assert-True ($run.ExitCode -eq 0 -and $run.Text -match 'RESULT: PASS') `
-        ('1) {0} 实跑绿（exit={1}）' -f $g.Key, $run.ExitCode) $tail
+    $green = ($run.ExitCode -eq 0)
+    if ($g.EmitsResult) { $green = $green -and ($run.Text -match 'RESULT: PASS'); $greenNote = '+RESULT: PASS' }
+    else { $greenNote = '+无 RESULT 行（登记 EmitsResult=false）' }
+    Assert-True $green ('1) {0} 实跑绿（exit={1} {2}）' -f $g.Key, $run.ExitCode, $greenNote) $tail
     Assert-True ($null -ne $sum) ('1) {0} 输出里有 summary pass=N fail=M（命中 {1} 条）' -f $g.Key, $(if ($sum) { $sum.SummaryCount } else { 0 })) $tail
     if ($sum) {
         $measured[$g.Key] = $sum.Pass
@@ -226,7 +251,7 @@ foreach ($g in $gates) {
 }
 if (-not $envReady -or $measured.Count -ne $gates.Count) {
     Write-Host ('summary pass={0} fail={1}' -f $pass, ($fail + 1))
-    Write-Host 'RESULT: FAIL — 环境错误：三道闸门没跑全'
+    Write-Host ('RESULT: FAIL — 环境错误：{0} 道闸门没跑全' -f $gates.Count)
     exit 2
 }
 
@@ -254,7 +279,7 @@ if (-not $SkipClaimCheck) {
     }
 
     $totalSites = $allClaims.Count
-    Assert-True ($totalSites -ge 10) ('2) 对拍面不是空集：文档里抓到 {0} 处断言数声明' -f $totalSites) `
+    Assert-True ($totalSites -ge 15) ('2) 对拍面不是空集：文档里抓到 {0} 处断言数声明' -f $totalSites) `
         (($allClaims | ForEach-Object { '{0}:{1} {2}={3}' -f $_.Source, $_.LineNo, $_.Gate, $_.Value }) -join ' ; ')
 
     foreach ($g in $gates) {
@@ -312,10 +337,10 @@ pwsh -NoProfile -File tests/verify-interval-zero-claims.ps1
         Source = 'fixture/leading-comment'; ExpectGate = 'interval-zero'; ExpectValue = 37; ExpectRed = $true
     }
     [pscustomobject]@{
-        Id = 'E'; Label = '3) 兄弟闸门的数不串味：verify-disabled-scheduling 的 13 条断言不算三道闸门的'
+        Id = 'E'; Label = '3) 未登记兄弟闸门的数不串味：csv-file 的 43 条断言不算登记闸门的'
         Text = @'
-# 停跑语义门禁：intervalMin 0/空/缺列/负数 = 停跑（13 条断言 + 3 个变异自证）
-pwsh -NoProfile -File tests/verify-disabled-scheduling.ps1
+# csv-file 自测：43 条断言
+pwsh -NoProfile -File tests/verify-csv-file-adapter.ps1
 '@
         Source = 'fixture/sibling'; ExpectGate = $null; ExpectValue = 0; ExpectRed = $false
     }
@@ -324,11 +349,30 @@ pwsh -NoProfile -File tests/verify-disabled-scheduling.ps1
         Text = 'measured  : doc-gate=pass21 / interval-zero=pass38 / scan-scope=pass19'
         Source = 'fixture/named'; ExpectGate = 'doc-gate'; ExpectValue = 21; ExpectRed = $true
     }
+    [pscustomobject]@{
+        Id = 'G'; Label = '3) 新登记的闸门同样自描述守：`writeback-plan=pass52`（实测 51）'
+        Text = 'measured  : writeback-plan=pass52 / command-adapter=pass45 / disabled-scheduling=pass13'
+        Source = 'fixture/named-new'; ExpectGate = 'writeback-plan'; ExpectValue = 52; ExpectRed = $true
+    }
+    [pscustomobject]@{
+        Id = 'H'; Label = '3) 一行两名且都登记 → 归属不明，不猜也不算证据'
+        Text = 'pwsh -NoProfile -File tests/verify-writeback-plan.ps1 ; pwsh -NoProfile -File tests/verify-command-adapter.ps1   # 51 条断言'
+        Source = 'fixture/two-registered'; ExpectGate = $null; ExpectValue = 0; ExpectRed = $false; ExpectAmbiguous = $true
+    }
+    [pscustomobject]@{
+        Id = 'I'; Label = '3) 一行两名但只有一家登记 → 同样不猜（宁可 NOTICE 也不乱贴）'
+        Text = 'pwsh -NoProfile -File tests/verify-disabled-scheduling.ps1 ; pwsh -NoProfile -File tests/verify-csv-file-adapter.ps1   # 13 条断言'
+        Source = 'fixture/mixed-names'; ExpectGate = $null; ExpectValue = 0; ExpectRed = $false; ExpectAmbiguous = $true
+    }
 )
 foreach ($f in $fixtures) {
     $hit = Get-GateClaimsFromText -Text $f.Text -Source $f.Source
     if ($null -eq $f.ExpectGate) {
         Assert-True ($hit.Claims.Count -eq 0) $f.Label (($hit.Claims | ForEach-Object { '{0}={1}' -f $_.Gate, $_.Value }) -join ', ')
+        if ($f.ExpectAmbiguous) {
+            Assert-True ($hit.Ambiguous.Count -eq 1) ('{0}：打 1 条归属不明 NOTICE（实得 {1}）' -f $f.Id, $hit.Ambiguous.Count) `
+                (($hit.Ambiguous | ForEach-Object { '{0}:{1} {2}' -f $_.Source, $_.LineNo, $_.Why }) -join ' ; ')
+        }
         continue
     }
     $got = @($hit.Claims | Where-Object { $_.Gate -eq $f.ExpectGate })

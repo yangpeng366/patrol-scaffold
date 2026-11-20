@@ -201,15 +201,17 @@ AST 断言调度层与契约层都没有默认间隔回退，再按段落/表格
 pwsh -NoProfile -File tests/verify-interval-zero-claims.ps1   # 38 条断言
 pwsh -NoProfile -File tests/verify-doc-gate-claims.ps1        # 20 条断言（同族：双门散文闸门）
 pwsh -NoProfile -File tests/verify-scan-scope-selfproof.ps1   # 19 条断言（扫描面收口自证：把上面两道闸门各跑 A/B/C 三段）
-pwsh -NoProfile -File tests/verify-gate-claim-counts.ps1       # 断言数机器对拍：文档里的 pass=N vs 三道闸门实测 summary
+pwsh -NoProfile -File tests/verify-gate-claim-counts.ps1       # 断言数机器对拍：文档里的 pass=N vs 六道闸门实测 summary
 ```
 
 两道散文闸门（口径 / 双门）各自带成对自证，扫描面默认只扫受控文件集（本机 gitignored 的本地扩展默认排除，
 `-IncludeLocalExtensions` 才拉进来）；第三条把「排除真生效」也钉住——干净机器上两道闸门都走「无可排除」分支时，
 排过头与压根没排都会红。三条都在 `.github/workflows/verify.yml` 里真跑（windows-latest，无凭据无网络）。
-上面三个断言数是本轮实测值（`pass=38` / `pass=20` / `pass=19`，均 `fail=0`）。这三个数现在由机器对拍守：
-`tests/verify-gate-claim-counts.ps1` 真跑三道闸门取 `summary pass=N`，再扫 AGENTS / README / SKILL / docs 里
-给它们写的断言数，不等就点名 `file:line` 判红——加了断言却忘改文档，CI 会拦住（改坏实测：把这里的
+上面三个断言数是本轮实测值（`pass=38` / `pass=20` / `pass=19`，均 `fail=0`）。这三组数现在由机器对拍守：
+`tests/verify-gate-claim-counts.ps1` 真跑六道闸门取 `summary pass=N`（上表三道，外加自报数字的
+`tests/verify-disabled-scheduling.ps1` / `tests/verify-writeback-plan.ps1` / `tests/verify-command-adapter.ps1`；
+加闸门只需在 `$gates` 表里添一行），再扫 AGENTS / README / SKILL / docs 里给它们写的断言数，不等就点名
+`file:line` 判红——加了断言却忘改文档，CI 会拦住（改坏实测：把这里的
 `38 条断言` 写成 37 → `README.md:201 写 N 条断言=37（实测 38）`）。
 
 跑不通先修 pwsh / 路径——链路跑不通之前，架构读了也白读。跑通后再读 `references/patrol-blueprint.md` 理解架构、`references/local-json-adapter.md` 换真实数据源。

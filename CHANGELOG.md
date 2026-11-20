@@ -27,11 +27,18 @@
   `RESULT: PASS` + `fail=0`），再扫 AGENTS / README / SKILL / docs / references 里给这三道闸门写的断言数
   （`pass=N` 与 `N 条断言` 两种写法），逐个必须等于实测，不等就点名 `file:line` 判红。归属按行/块判：同行
   唯一文件名 / 自描述 `doc-gate=passN` / 结果行（`#   → summary pass=N`）回溯上文命令 / 说明注释前探下文
-  命令；兄弟闸门（如 `verify-disabled-scheduling` 的 13 条断言）不串味；`CHANGELOG.md` 是发布历史，
+  命令；未登记闸门的数（如 `verify-csv-file-adapter`）不串味；`CHANGELOG.md` 是发布历史，
   不参与对拍（只 `NOTICE` 点名）。
-  自带 6 段成对自证（陈旧数字必红 / 正确必绿 / 结果行归属 / 前导注释归属 / 兄弟不串味 / 自描述写法），
+  自带 6 段成对自证（陈旧数字必红 / 正确必绿 / 结果行归属 / 前导注释归属 / 未登记闸门不串味 / 自描述写法），
   已挂 CI `gate claim-count cross-check`。改坏实测：把 README 的 `38 条断言` 改成 37 → 判红并点名
   `README.md:201 写 N 条断言=37（实测 38）`。本闸门自身不对外公布断言数——否则又是一个没人守的数字。
+- **断言数对拍扩到六道闸门：`disabled-scheduling` / `writeback-plan` / `command-adapter` 一并登记。**
+  上一轮只守三道具文/扫描面闸门，其余自带数字的离线闸门（停跑语义 13 / 回写层 51 / command 45）仍靠人眼。
+  本轮把 `$gates` 表作为唯一登记面：加闸门只加一行，自描述正则（`<key>=passN`）从表里生成，判红点名也用
+  表里的短名。两处口径差异如实登记而不是硬编特例：`verify-command-adapter.ps1` 只打
+  `summary pass=N fail=0`、不打 `RESULT: PASS`，故其行 `EmitsResult=$false`；归属侧同时收窄到 `verify-*.ps1`
+  （同段提一句 `scripts/patrol-writeback.ps1` 不算「第二名」），未登记闸门与「一行两名」一律只打 `NOTICE` 不猜。
+  自证从 6 段扩到 9 段（新增：新登记闸门的自描述写法必红 / 一行两名都登记不猜 / 一行两名仅一家登记也不猜）。
 - **`scripts/patrol-writeback.ps1`：回写层落地，默认 preview（零远端写入）+ 幂等键 + 可重放账本。**
   此前第 4 层 sync-back 只有两条路：`Sync-BitableRoundResult` 直写（开了门就写，重跑就重写），或者不写。
   现在中间多一层计划：digest 一行翻译成一个字段集 + 一个确定性键

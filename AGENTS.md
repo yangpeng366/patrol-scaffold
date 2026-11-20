@@ -115,7 +115,7 @@ pwsh -NoProfile -File scripts/build-release.ps1 -IncludeUntracked
 ```powershell
 pwsh -NoProfile -File scripts/adapter-contract-test.ps1          # 契约自测
 pwsh -NoProfile -File tests/verify-adapter-spec.ps1             # 描述文件漂移
-pwsh -NoProfile -File tests/verify-disabled-scheduling.ps1      # 停跑语义
+pwsh -NoProfile -File tests/verify-disabled-scheduling.ps1      # 停跑语义：13 条断言 + 3 个变异自证
 pwsh -NoProfile -File tests/verify-decision-prompt.ps1          # 提示词决策层
 pwsh -NoProfile -File tests/verify-bitable-golden-sanitizer.ps1 # 黄金样本脱敏
 pwsh -NoProfile -File tests/verify-bitable-live.ps1           # bitable 只读实跑闸门（默认离线，live 段 SKIP）
@@ -212,7 +212,7 @@ pwsh -NoProfile -File tests/verify-command-adapter.ps1          # command pass=4
 pwsh -NoProfile -File tests/verify-tencent-docs-adapter.ps1     # 腾讯文档 mock pass=17 fail=0
 pwsh -NoProfile -File tests/verify-no-secrets.ps1               # 密钥卫生 pass=12 fail=0
 pwsh -NoProfile -File tests/verify-secret-history.ps1           # git 历史里的密钥 hits=0
-pwsh -NoProfile -File tests/verify-gate-claim-counts.ps1         # 三道闸门断言数对拍（文档 pass=N vs 实测）
+pwsh -NoProfile -File tests/verify-gate-claim-counts.ps1         # 六道闸门断言数对拍（文档 pass=N vs 实测）
 pwsh -NoProfile -File tests/verify-install-drift.ps1            # 安装漂移（含坏样本自证）
 ```
 

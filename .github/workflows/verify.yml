@@ -7,7 +7,7 @@ name: verify
 # 稀疏 checkout 后真跑，不再是 SKIP）、安装漂移自检的自证段、密钥卫生、发布归档自证（内容清单 /
 # 逐条哈希 / 禁入模式 / 用户改动排除 / 产物密钥扫描）。
 # 本仓之外的取数动作只有「稀疏 checkout 公开兄弟仓 yangpeng366/dsh-patrol 的 schemas/ 与 src/」一条，
-# 其余全部离线；另有一道元闸门把上面三道散文/扫描面闸门的「断言数」与实测 summary 对拍。
+# 其余全部离线；另有一道元闸门把上面六道闸门的「断言数」（三道具文/扫描面 + 三道自报数字的离线闸门）与实测 summary 对拍。
 # 不装依赖、不跑网络用例、不需要任何 secret（公开仓用默认 GITHUB_TOKEN 即可）。
 
 on:
@@ -146,7 +146,7 @@ jobs:
         shell: pwsh
         run: pwsh -NoProfile -File tests/verify-scan-scope-selfproof.ps1
 
-      # 断言数机器对拍：真跑上面三道闸门取 summary pass=N，再比对 README / AGENTS / SKILL / docs 里给它们写的
+      # 断言数机器对拍：真跑上面六道闸门取 summary pass=N（含 disabled-scheduling / writeback-plan / command-adapter），再比对 README / AGENTS / SKILL / docs 里给它们写的
       # 断言数（pass=N / N 条断言），不等就点名 file:line 判红——上一轮靠人工复跑才发现 doc-gate 写 19、实测 20。
       - name: gate claim-count cross-check
         shell: pwsh
