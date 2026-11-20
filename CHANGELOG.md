@@ -128,6 +128,11 @@
 
 ### Changed
 
+- **CI 首跑核准 + 三道闸门断言数校准**：`scan-scope self-proof` 在 GitHub Actions 首跑（run 38 / `ec3af79`）
+  相关三步全绿——`doc gate-claims drift`（step 17）、`interval-zero claims drift`（step 18）、
+  `scan-scope self-proof`（step 19）；本机复跑三条闸门实测 `pass=20 / pass=38 / pass=19`，均 `fail=0`。
+  据此把口径数核准到实测值：doc-gate 19→20、interval-zero 37→38，并把三道闸门补进 `README.md` 文件清单
+  与 CI 描述行（此前清单只提 interval-zero 一条，doc-gate 与 scan-scope 没有入口，读者找不到怎么跑）。
 - **调度层改为「`intervalMin` = 0 / 空 / 缺列 / 负数 = 停跑」**（生产口径，表数据约定优先）。
   `scripts/patrol-loop.ps1` 原先把 `<=0` 回退成 60 分钟，已停行会被每轮复活；现在 due-list 交给新文件
   `scripts/patrol-schedule.ps1::Get-PatrolDueSelection`：只有 `intervalMin > 0` 且 `lastRun` 为空 /

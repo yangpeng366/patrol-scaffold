@@ -197,7 +197,7 @@ pwsh -NoProfile -File tests/verify-item-parity-e2e.ps1          # 跨仓动态�
 pwsh -NoProfile -File scripts/adapter-contract-test.ps1          # 契约自测 pass=3 skip=2 fail=0
 pwsh -NoProfile -File tests/verify-adapter-spec.ps1             # 描述文件漂移
 pwsh -NoProfile -File tests/verify-disabled-scheduling.ps1      # 停跑语义
-pwsh -NoProfile -File tests/verify-interval-zero-claims.ps1     # 口径散文（0 = 停跑）pass=37 fail=0
+pwsh -NoProfile -File tests/verify-interval-zero-claims.ps1     # 口径散文（0 = 停跑）pass=38 fail=0
 pwsh -NoProfile -File tests/verify-decision-prompt.ps1          # 提示词决策层 pass=27 fail=0
 pwsh -NoProfile -File tests/verify-bitable-golden-sanitizer.ps1 # 黄金样本脱敏
 pwsh -NoProfile -File tests/verify-bitable-live.ps1           # bitable 只读实跑闸门（默认离线，live 段 SKIP）
