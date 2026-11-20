@@ -75,6 +75,7 @@ pwsh -NoProfile -File tests/verify-bitable-live.ps1 -Live     # 真读方向表 
 | `verify-state-externalization.ps1` | `state externalization: PASS` | 任意断言 FAIL |
 | `verify-install-drift.ps1` | `summary selftest pass=16 fail=0` + `RESULT: PASS`；实检时另加 `summary checked=<N> ok=<N> fail=0` | `selftest fail>0`，或实检 `fail>0`（缺文件 / content / bom / extra / unreadable 任一） |
 | `verify-bitable-live.ps1` | 默认路径 `summary pass=6 skip=1 fail=0`（`-Live` 时 `pass=14 skip=0 fail=0`） | `fail>0`（缺凭据只 SKIP，不算红） |
+| `verify-gate-claim-counts.ps1` | 三道闸门各自 `summary pass=N fail=0` + `RESULT: PASS`，末尾 `measured  : doc-gate=passN / interval-zero=passN / scan-scope=passN` | 任一文档断言数与实测不等（点名 `file:line`）、或任一闸门 `RESULT: FAIL` |
 
 `adapter-contract-test` 的 `pass=3 skip=2` 是本版**正常**结果，不是缺陷：`command` / `csv-file` /
 `local-json` 实跑，`bitable` / `tencent-docs` 因无凭据 SKIP。SKIP 的判据、覆盖缺口与否决条件见 §5。

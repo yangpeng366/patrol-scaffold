@@ -21,6 +21,17 @@
 
 ### Added
 
+- **`tests/verify-gate-claim-counts.ps1`：三道闸门的断言数机器对拍（离线，零凭据零网络）。** 上一轮把
+  `pass=20 / pass=38 / pass=19` 校准到实测值，靠的是人工复跑；没有任何东西守「加了一条断言却忘改文档」。
+  本轮把它变成闸门：子进程真跑 doc-gate / interval-zero / scan-scope 取 `summary pass=N`（必须 `exit 0` +
+  `RESULT: PASS` + `fail=0`），再扫 AGENTS / README / SKILL / docs / references 里给这三道闸门写的断言数
+  （`pass=N` 与 `N 条断言` 两种写法），逐个必须等于实测，不等就点名 `file:line` 判红。归属按行/块判：同行
+  唯一文件名 / 自描述 `doc-gate=passN` / 结果行（`#   → summary pass=N`）回溯上文命令 / 说明注释前探下文
+  命令；兄弟闸门（如 `verify-disabled-scheduling` 的 13 条断言）不串味；`CHANGELOG.md` 是发布历史，
+  不参与对拍（只 `NOTICE` 点名）。
+  自带 6 段成对自证（陈旧数字必红 / 正确必绿 / 结果行归属 / 前导注释归属 / 兄弟不串味 / 自描述写法），
+  已挂 CI `gate claim-count cross-check`。改坏实测：把 README 的 `38 条断言` 改成 37 → 判红并点名
+  `README.md:201 写 N 条断言=37（实测 38）`。本闸门自身不对外公布断言数——否则又是一个没人守的数字。
 - **`scripts/patrol-writeback.ps1`：回写层落地，默认 preview（零远端写入）+ 幂等键 + 可重放账本。**
   此前第 4 层 sync-back 只有两条路：`Sync-BitableRoundResult` 直写（开了门就写，重跑就重写），或者不写。
   现在中间多一层计划：digest 一行翻译成一个字段集 + 一个确定性键

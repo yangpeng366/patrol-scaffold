@@ -201,12 +201,16 @@ AST 断言调度层与契约层都没有默认间隔回退，再按段落/表格
 pwsh -NoProfile -File tests/verify-interval-zero-claims.ps1   # 38 条断言
 pwsh -NoProfile -File tests/verify-doc-gate-claims.ps1        # 20 条断言（同族：双门散文闸门）
 pwsh -NoProfile -File tests/verify-scan-scope-selfproof.ps1   # 19 条断言（扫描面收口自证：把上面两道闸门各跑 A/B/C 三段）
+pwsh -NoProfile -File tests/verify-gate-claim-counts.ps1       # 断言数机器对拍：文档里的 pass=N vs 三道闸门实测 summary
 ```
 
 两道散文闸门（口径 / 双门）各自带成对自证，扫描面默认只扫受控文件集（本机 gitignored 的本地扩展默认排除，
 `-IncludeLocalExtensions` 才拉进来）；第三条把「排除真生效」也钉住——干净机器上两道闸门都走「无可排除」分支时，
 排过头与压根没排都会红。三条都在 `.github/workflows/verify.yml` 里真跑（windows-latest，无凭据无网络）。
-上面三个断言数是本轮实测值（`pass=38` / `pass=20` / `pass=19`，均 `fail=0`）。
+上面三个断言数是本轮实测值（`pass=38` / `pass=20` / `pass=19`，均 `fail=0`）。这三个数现在由机器对拍守：
+`tests/verify-gate-claim-counts.ps1` 真跑三道闸门取 `summary pass=N`，再扫 AGENTS / README / SKILL / docs 里
+给它们写的断言数，不等就点名 `file:line` 判红——加了断言却忘改文档，CI 会拦住（改坏实测：把这里的
+`38 条断言` 写成 37 → `README.md:201 写 N 条断言=37（实测 38）`）。
 
 跑不通先修 pwsh / 路径——链路跑不通之前，架构读了也白读。跑通后再读 `references/patrol-blueprint.md` 理解架构、`references/local-json-adapter.md` 换真实数据源。
 
@@ -294,6 +298,7 @@ pwsh -NoProfile -File scripts/build-release.ps1 -IncludeUntracked
 - `tests/verify-doc-gate-claims.ps1` — 双门口径漂移闸门（20 条断言）：AST 钉 `Sync-BitableRoundResult` 具名参数，散文不许重新长出 `-SyncBack`；带「历史漂移原文必红 / 改正必绿」成对自证
 - `tests/verify-interval-zero-claims.ps1` — `interval=0` 口径漂移闸门（38 条断言）：AST 钉调度层/契约层无默认间隔回退，散文与示例数据不许把 `0` 写成「每轮都跑」
 - `tests/verify-scan-scope-selfproof.ps1` — 扫描面收口自证（19 条断言）：`%TEMP%` 现造 git 仓 + gitignored 漂移样本，两道口径闸门各跑默认必绿 / `-IncludeLocalExtensions` 必红 / 提为受控后必红
+- `tests/verify-gate-claim-counts.ps1` — 断言数机器对拍：子进程真跑上面三道闸门取 `summary pass=N`（必须 `exit 0` + `fail=0`），再扫 AGENTS / README / SKILL / docs / references 里给它们写的断言数（`pass=N` / `N 条断言`），不等即点名 `file:line` 判红；带「陈旧数字必红 / 正确必绿 / 结果行归属 / 前导注释归属 / 兄弟闸门不串味」成对自证，`CHANGELOG.md` 作为发布历史不参与对拍
 - `tests/verify-provider-isolation.ps1` — 多 provider 同进程同名函数不串味（装配层回归）
 - `tests/verify-install-drift.ps1` — **安装漂移门禁**：已安装 skill 与仓库 HEAD 逐文件 SHA256（缺文件 / 内容漂移 / BOM / 多余源码文件 / 不可读均 `exit 1` 并点名；`downloads/` `memory/` `notify.log` 等运行时产物不误报也不删除）；带 16 条自证，装完 / 升完跑一次
 - `tests/verify-secret-history.ps1` — 历史密钥盘点：只报告命中提交，不改历史

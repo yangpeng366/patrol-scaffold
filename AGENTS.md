@@ -65,6 +65,10 @@ pwsh -NoProfile -File tests/verify-interval-zero-claims.ps1
 pwsh -NoProfile -File tests/verify-scan-scope-selfproof.ps1
 #   → summary pass=19 fail=0 + RESULT: PASS
 
+# 断言数机器对拍：真跑上面三道闸门取 summary pass=N，再比对文档里给它们写的断言数（不等即点名 file:line）
+pwsh -NoProfile -File tests/verify-gate-claim-counts.ps1
+#   → measured  : doc-gate=pass20 / interval-zero=pass38 / scan-scope=pass19 + RESULT: PASS
+
 # 提示词决策层自测：提示词契约 + 解析器行为（不联网、不调模型、零凭据）
 pwsh -NoProfile -File tests/verify-decision-prompt.ps1
 #   → summary pass=27 fail=0
@@ -208,6 +212,7 @@ pwsh -NoProfile -File tests/verify-command-adapter.ps1          # command pass=4
 pwsh -NoProfile -File tests/verify-tencent-docs-adapter.ps1     # 腾讯文档 mock pass=17 fail=0
 pwsh -NoProfile -File tests/verify-no-secrets.ps1               # 密钥卫生 pass=12 fail=0
 pwsh -NoProfile -File tests/verify-secret-history.ps1           # git 历史里的密钥 hits=0
+pwsh -NoProfile -File tests/verify-gate-claim-counts.ps1         # 三道闸门断言数对拍（文档 pass=N vs 实测）
 pwsh -NoProfile -File tests/verify-install-drift.ps1            # 安装漂移（含坏样本自证）
 ```
 
