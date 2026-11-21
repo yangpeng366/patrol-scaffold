@@ -90,7 +90,8 @@ pwsh -NoProfile -File scripts/build-release.ps1 -IncludeUntracked
 #   → 12 项 verify 全 ok + RESULT: PASS；不带 -IncludeUntracked 且仓内有未跟踪文件时会 FAIL 并列出
 ```
 
-**中文控制台注意**：本机默认代码页 936 时，`tests/verify-command-adapter.ps1` 与 `tests/verify-item-parity-e2e.ps1` 的中文断言会假红（子进程 stdout 编码）。先 `chcp 65001` 再跑即恢复 `pass=45 fail=0` / `RESULT: PASS`。这是环境问题，不是代码坏了。
+**中文控制台注意**：本机默认代码页 936 时，`tests/verify-command-adapter.ps1` 的中文断言会假红（子进程 stdout 编码）。先 `chcp 65001` 再跑即恢复 `pass=45 fail=0`。
+`tests/verify-item-parity-e2e.ps1` 同理：`chcp 65001` 后恢复 `RESULT: PASS`。这是环境问题，不是代码坏了。
 
 ## 5. 改动规矩
 
