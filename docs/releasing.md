@@ -151,6 +151,28 @@ Get-Content SHA256SUMS.txt | ForEach-Object {
 }
 ```
 
+### 2.3 发布清单（归档实测记录）
+
+每跑一次 `build-release.ps1` 就往下加一行；只有 `RESULT: PASS` 的行才允许进 §6 打 tag。
+产物落在 `%TEMP%`、不入仓、会随系统清理，所以**别只留路径**：`sha256` + `SHA256SUMS.txt` 才是别人能复核的判据。
+
+| 日期 | 版本 | base commit | 文件数 | 归档 | 字节 | sha256（前 8） | 复现 | RESULT |
+|---|---|---|---|---|---|---|---|---|
+| 2026-11-23 | 0.2.0 | `d28890e` | 66（+`SHA256SUMS.txt` = 67 条目） | `%TEMP%\patrol-scaffold-release\patrol-scaffold-0.2.0.zip` | 337531 | `aa113a27` | 同机连跑两次 sha256 相同 | `PASS`（12/12 verify ok） |
+
+本轮 12 项 verify 全 `ok`：`version` / `changelog` / `no-runtime-files` / `adapter-modules` / `manifest` /
+`archive-paths` / `archive-manifest` / `archive-hashes` / `archive-clean` / `archive-version` /
+`user-changes-out` / `artifact-secrets`（`pass=8 fail=0 skip=2 hits=0`）。
+
+```
+sha256  aa113a2767464d281cfce033b1cfb27794d02236bd4e89243d02122bb6590334
+sidecar %TEMP%\patrol-scaffold-release\patrol-scaffold-0.2.0.zip.sha256
+打包时 git status --short：<clean>；head-sourced 命中 scripts/sample-tasks.json（工作区改动已排除）
+```
+
+> 这一行是 **0.2.0 候选归档**，不是已发布：tag 仍按 §6 由维护者手工打；`VERSION` 未变（`0.2.0`），
+> 重新打包会让 sha256 变化（条目时间戳固定为 HEAD 提交时间，只要 HEAD 前进就不同），复核请以当次输出为准。
+
 ---
 
 ## 3. 安装
