@@ -206,8 +206,8 @@ pwsh -NoProfile -File <repo>\tests\verify-install-drift.ps1 `
   -RepoRoot <repo> -InstalledPath "$env:CODEX_HOME\skills\patrol-scaffold"
 ```
 
-- **PASS 判定**：`summary checked=<N> ok=<N> fail=0` + `RESULT: PASS`（`N` = HEAD 受控文件数，本版为 53；
-  少装一个文件会变成 `missing` 并 `fail=1`）。
+- **PASS 判定**：`summary checked=<N> ok=<N> fail=0` + `RESULT: PASS`（`N` = HEAD 受控文件数，0.2.0 为 66；
+  少装一个文件会变成 `missing` 并 `fail=1`）。`N` 随 HEAD 增长，**别把它当常量背**——对不上就先 `git ls-tree -r HEAD | measure` 再判断是不是真缺文件。
 - **`exit 1`**：有漂移，逐条 `[FAIL] <kind> <path>` 点名。`kind` 只有六种：`missing`（缺文件）、
   `not-a-file`（该是文件却是目录）、`content`（内容漂移；detail 会注明是否仅换行符差异）、
   `bom`（UTF-8 BOM 与 HEAD 不一致）、`extra`（多出的受控/源码文件）、`unreadable`（打不开）。
@@ -224,10 +224,11 @@ pwsh -NoProfile -File <repo>\tests\verify-install-drift.ps1 `
   这是预期行为：本地扩展应放仓外；确需纳入/忽略用 `-ExcludePath 'tests/verify-bitable-adapter.ps1'`，
   或给一份完整受控清单 `-ManifestFile <清单>`（一行一个相对路径，`#` 开头为注释；给了清单就**不再**
   从 HEAD 推导，清单外的文件按 `extra` 报）。
-- 自证段（不带 `-InstalledPath` 时只跑它，CI 跑的就是这个）用 %TEMP% 里现造的 git 仓断言 14 条：
+- 自证段（不带 `-InstalledPath` 时只跑它，CI 跑的就是这个）用 %TEMP% 里现造的 git 仓断言 16 条：
   干净副本 PASS、篡改一个字节 FAIL 且点名、缺文件 FAIL 且点名、运行态多余文件不误报且不被删除、
   多余源码文件 FAIL、BOM 报出、工作区脏但安装==HEAD 仍 PASS、不可读文件 FAIL 且句柄释放后恢复 PASS、
-  显式清单生效、`-ExcludePath` 生效、CRLF/LF 差异能点名。
+  显式清单生效、`-ExcludePath` 生效、CRLF/LF 差异能点名、落后一个提交的旧副本 FAIL 且点名缺失新文件、
+  新旧两版并存 FAIL 且点名多出的旧受控文件。
 
 ---
 
