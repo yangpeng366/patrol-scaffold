@@ -211,6 +211,16 @@
   `checked=66 ok=0 fail=68 missing=18 content=48 extra=2`。自证加一条
   `e2) extra 不让 ok 变负`，总数 16 → 17，`README.md` 与 `docs/releasing.md` §3.1 的散文数同步。
 
+- **已安装副本（非 git 仓）里量不了自检，`verify-install-drift.ps1` 直接 `exit 2` 拒跑**。真实的安装目录
+  只是一份拷贝、没有 `.git`，于是「只跑自证段」这个最常用的场景（换了台机器、包已装好、仓还没拉）
+  拿到的是一句「不是 git 仓库」。现在区分两种情形：不带 `-RepoRoot` 且它**默认解析出来的目录**不是 git 仓
+  （典型就是已安装 skill 目录）→ 打 `[NOTICE] 非 git 副本…`、只跑自证段、`RESULT: PASS` 退 0；
+  人**显式**传了 `-RepoRoot`/带了 `-InstalledPath` 却指到非 git 仓 → 仍 `exit 2`（避免参数用错时默默 PASS）。
+  自证加两条（`n` 非 git 副本不 exit 2 / `n2` 显式非 git 仓仍 exit 2），17 → 19 条，README 与 §3.1 散文数同步。
+  另：`docs/releasing.md` §4 记下本轮实测的坑——`core.autocrlf=true` 的 Windows 上 `git archive` 取出来是
+  CRLF，整包拷进安装目录会让 66 个文件全报「仅换行符不同」，得用
+  `git -c core.autocrlf=false -c core.eol=lf archive …` 取 LF 字节。
+
 ## [0.2.0] - 2026-11-11
 
 主题：**把「换数据源」从文档承诺变成有闸门的能力**。本版新增契约层、声明式注册、两个离线 provider

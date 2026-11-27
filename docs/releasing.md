@@ -212,7 +212,9 @@ pwsh -NoProfile -File <repo>\tests\verify-install-drift.ps1 `
 - **`exit 1`**：有漂移，逐条 `[FAIL] <kind> <path>` 点名。`kind` 只有六种：`missing`（缺文件）、
   `not-a-file`（该是文件却是目录）、`content`（内容漂移；detail 会注明是否仅换行符差异）、
   `bom`（UTF-8 BOM 与 HEAD 不一致）、`extra`（多出的受控/源码文件）、`unreadable`（打不开）。
-- **`exit 2`**：用法/环境错误（不是 git 仓、安装目录不存在、`-InstalledPath` 指到了仓库本身）。
+- **`exit 2`**：用法/环境错误（`-InstalledPath` 指向仓库本身、安装目录不存在；或**显式**给的 `-RepoRoot`
+  不是 git 仓）。反过来，在**已安装目录**（非 git 副本）里不带参数跑不会报错：那里没有 HEAD 可比，
+  脚本只跑自证段并打 `[NOTICE] 非 git 副本…` 后 `RESULT: PASS`——换台机器先把包装上、还没拉仓时也能自检。
 
 口径写死，不靠约定：
 
@@ -225,11 +227,12 @@ pwsh -NoProfile -File <repo>\tests\verify-install-drift.ps1 `
   这是预期行为：本地扩展应放仓外；确需纳入/忽略用 `-ExcludePath 'tests/verify-bitable-adapter.ps1'`，
   或给一份完整受控清单 `-ManifestFile <清单>`（一行一个相对路径，`#` 开头为注释；给了清单就**不再**
   从 HEAD 推导，清单外的文件按 `extra` 报）。
-- 自证段（不带 `-InstalledPath` 时只跑它，CI 跑的就是这个）用 %TEMP% 里现造的 git 仓断言 17 条：
+- 自证段（不带 `-InstalledPath` 时只跑它，CI 跑的就是这个）用 %TEMP% 里现造的 git 仓断言 19 条：
   干净副本 PASS、篡改一个字节 FAIL 且点名、缺文件 FAIL 且点名、运行态多余文件不误报且不被删除、
   多余源码文件 FAIL、多出文件时 `ok` 仍等于受控数（不出现负数 `ok`）、BOM 报出、工作区脏但安装==HEAD 仍 PASS、不可读文件 FAIL 且句柄释放后恢复 PASS、
   显式清单生效、`-ExcludePath` 生效、CRLF/LF 差异能点名、落后一个提交的旧副本 FAIL 且点名缺失新文件、
-  新旧两版并存 FAIL 且点名多出的旧受控文件。
+  新旧两版并存 FAIL 且点名多出的旧受控文件、非 git 副本不带参数只跑自证段（不 exit 2）、
+  显式给非 git 仓仍 exit 2。
 
 ---
 
@@ -257,6 +260,12 @@ pwsh -NoProfile -File <repo>\tests\verify-install-drift.ps1 `
 ```
 
 升级时必看的两个点：
+
+- **拷文件的方式会决定漂移检查绿不绿**。HEAD 里的源码是 LF，`core.autocrlf=true` 的 Windows 上
+  `git archive` / `git checkout` 取出来是 CRLF，整包拷进安装目录后自检会一次性报几十条
+  `content … 仅换行符不同`——那不是安装错了，是拷贝方式改了字节。要么用不改换行符的方式
+  （`git -c core.autocrlf=false -c core.eol=lf archive …` 后解包，或直接解发布 zip），要么就当成
+  真漂移逐文件用 HEAD 字节覆盖。
 
 - **`state/patrol-state.json` 兼容性**：本版只存 `id` / `lastRun` / 阶段字段，键集合未变即可直接用；
   若某版改了状态文件形状，`CHANGELOG.md` 的 Changed 节会写明迁移方式（本版无需迁移）。

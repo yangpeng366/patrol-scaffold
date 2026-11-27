@@ -31,6 +31,9 @@
       # 1) 只跑自证（CI / 无本机安装时）
       pwsh -NoProfile -File tests/verify-install-drift.ps1
 
+      # 1b) 在已安装 skill 目录里跑自证（副本不是 git 仓，没有 HEAD 可比，只能来自证段）
+      pwsh -NoProfile -File <skill-dir>\tests\verify-install-drift.ps1
+
       # 2) 实检本机已安装 skill
       pwsh -NoProfile -File tests/verify-install-drift.ps1 -InstalledPath "$env:CODEX_HOME\skills\patrol-scaffold"
 
@@ -38,7 +41,7 @@
       pwsh -NoProfile -File tests/verify-install-drift.ps1 -InstalledPath <dir> -ManifestFile .\drift-manifest.txt
       pwsh -NoProfile -File tests/verify-install-drift.ps1 -InstalledPath <dir> -ExcludePath 'docs/*.md'
 
-    退出码：0 = PASS；1 = 有漂移或自证失败；2 = 用法/环境错误（不是 git 仓、安装目录不存在等）。
+    退出码：0 = PASS；1 = 有漂移或自证失败；2 = 用法/环境错误（显式给的仓库路径不是 git 仓、安装目录不存在等）。
 
     运行环境：仅 PowerShell 7（pwsh）+ git。源码 UTF-8 无 BOM。
 #>
@@ -570,6 +573,25 @@ function Invoke-DriftSelfTest {
     $hit = @($r.Findings | Where-Object { $_.Kind -eq 'extra' -and $_.Path -eq 'scripts/patrol-loop.ps1' })
     Assert-DriftSelfTest 'm) 新旧两版并存 FAIL 且点名多出的旧受控文件' ((-not $r.Ok) -and $hit.Count -eq 1 -and $r.Findings.Count -eq 1) (Get-FindingDetail $r)
 
+    # n) 已安装 skill 目录不是 git 仓：不带参数必须只跑自证段，不许 exit 2 拒跑
+    #    （旧实现在这种最常用的场景下直接报「不是 git 仓库」—已安装副本等于无法自检）
+    $nongit = Join-Path $Root 'n-nongit'
+    New-Item -ItemType Directory -Force -Path $nongit | Out-Null
+    $nongitScript = Join-Path $nongit 'verify-install-drift.ps1'
+    Copy-Item -LiteralPath $PSCommandPath -Destination $nongitScript -Force
+    $pwshExe = Join-Path $PSHOME $(if ($IsWindows) { 'pwsh.exe' } else { 'pwsh' })
+    $childOut = & $pwshExe -NoProfile -File $nongitScript -NoSelfTest 2>&1
+    $childCode = $LASTEXITCODE
+    $childText = ($childOut | Out-String)
+    Assert-DriftSelfTest 'n) 非 git 副本不带参数 = 只跳 live 检查、不 exit 2' `
+        ($childCode -eq 0 -and $childText -match '\[NOTICE\] 非 git 副本' -and $childText -match 'RESULT: PASS') `
+        ("exit={0}" -f $childCode)
+
+    # n2) 反过来：人显式指了一个非 git 仓，那是用错参数，必须 exit 2（不能默默 PASS）
+    $childOut = & $pwshExe -NoProfile -File $nongitScript -NoSelfTest -RepoRoot $nongit 2>&1
+    $childCode = $LASTEXITCODE
+    Assert-DriftSelfTest 'n2) 显式给非 git 仓仍 exit 2（不默默 PASS）' ($childCode -eq 2) ("exit={0}" -f $childCode)
+
     return [pscustomobject]@{ Pass = $script:SelfPass; Fail = $script:SelfFail }
 }
 
@@ -586,8 +608,15 @@ try {
     }
     $repoCheck = Invoke-GitRaw -Repo $RepoRoot -Arguments @('rev-parse', '--show-toplevel')
     if ($repoCheck.ExitCode -ne 0) {
-        Write-Host ("RESULT: FAIL — 不是 git 仓库：{0}" -f $RepoRoot)
-        exit 2
+        # 已安装的 skill 目录不是 git 仓：那里根本没有 HEAD 可比，但自证段自带临时 git 仓、照样能跑。
+        # 只有「人显式指了仓」或「要实检安装目录」时，非 git 仓才是真的用错——那是 exit 2。
+        $repoExplicit = $PSBoundParameters.ContainsKey('RepoRoot')
+        if ($repoExplicit -or -not [string]::IsNullOrWhiteSpace($InstalledPath)) {
+            Write-Host ("RESULT: FAIL — 不是 git 仓库：{0}" -f $RepoRoot)
+            Write-Host '提示：非 git 副本（已安装 skill 目录）没有 HEAD 可比；只想跑自证就不带 -RepoRoot / -InstalledPath 直接运行本脚本'
+            exit 2
+        }
+        Write-Host ("[NOTICE] 非 git 副本（{0}）：无 HEAD 可比，只跑自证段（自证自带临时 git 仓）" -f $RepoRoot)
     }
 
     if (-not $NoSelfTest) {
