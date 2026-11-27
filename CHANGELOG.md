@@ -21,6 +21,15 @@
 
 ### Added
 
+- **`scripts/sync-install.ps1` + `tests/verify-install-sync.ps1`：装/升安装的「按 HEAD 字节同步」。**
+  `docs/releasing.md` §4 早就承认升级只能「逐文件用 HEAD 字节覆盖」，但那条路一直是手工的——实际代价
+  是一次「补 18 个缺文件、覆盖 48 个漂移文件」的操作，且 `core.autocrlf=true` 下取出来的 CRLF 会一次性
+  变成几十条 `content … 仅换行符不同`。本脚本把这一步变成一条幂等命令：基准同样是 HEAD blob（不是工作区），
+  只在字节不同/缺失时写，写入用原始 blob 字节（不解码，不会引入 BOM 或改换行符），**只写不删**——运行时产物
+  被显式拒写，本地扩展留着让 drift 自检报 `extra`（删不删由人定），受控路径被目录占位则 `exit 1` 点名。
+  自带 13 条行为闸门（`summary pass=13 fail=0`）：干净副本 `written=0`、`-DryRun` 不落盘、漂移副本 `written=3`、
+  同步后交 `verify-install-drift` 复核只剩 `extra`、运行态字节不变、扩展不删、连跑两次幂等、CRLF 副本同步后
+  drift 直接 PASS、目录占位 `exit 1`、三类环境错误 `exit 2`。
 - **`tests/verify-gate-claim-counts.ps1`：三道闸门的断言数机器对拍（离线，零凭据零网络）。** 上一轮把
   `pass=20 / pass=38 / pass=19` 校准到实测值，靠的是人工复跑；没有任何东西守「加了一条断言却忘改文档」。
   本轮把它变成闸门：子进程真跑 doc-gate / interval-zero / scan-scope 取 `summary pass=N`（必须 `exit 0` +
@@ -186,6 +195,13 @@
   `docs/releasing.md` / `SKILL.md` / CI 同步新口径与实测数字（3 行样本：`due=1/3 disabled=2`）。
 
 ### Fixed
+
+- **安装文档里的 `"$env:CODEX_HOME\skills\patrol-scaffold"` 在未设 `CODEX_HOME` 的机器上是一条假命令。**
+  本机实测 `CODEX_HOME` 为空：该写法展开成 `\skills\patrol-scaffold`，自检随即 `RESULT: FAIL — 安装目录不存在
+  或不是目录` / `exit 2`——看起来像环境坏了，其实是路径没解析。README、`docs/releasing.md` §1/§3/§3.1/§4
+  与 `tests/verify-install-drift.ps1` 的帮助示例统一改成先解析一次
+  `$codexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $HOME '.codex' }` / `$skillDir`，
+  并在原处写明「`CODEX_HOME` 未设时默认 `~/.codex`」。脚本行为未变（无参数仍只跑自证段，不自动猜安装目录）。
 
 - **`bitable` 写回的「双门」口径更正：不存在 `-SyncBack` 参数**。`scripts/BitAbleAdapter.ps1` 头注释、
   `adapters/bitable.adapter.json` 的 `description`、`README.md` 的 provider 表格（以及

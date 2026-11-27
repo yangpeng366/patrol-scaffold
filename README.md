@@ -249,15 +249,24 @@ args 里的 `${...}` 占位能在 `config` 中解析（`${tasksFile}` 例外，�
 [一键安装（面向 Agent）](#一键安装面向-agent)；以下是不走收录器的手动归档安装。
 
 ```powershell
+# 先把 skill 目录解析一次：CODEX_HOME 未设时默认 ~/.codex（直接写 "$env:CODEX_HOME\skills\..." 在未设时
+# 会展开成 \skills\patrol-scaffold，自检 exit 2——那是路径没解析，不是装错了）
+$codexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $HOME '.codex' }
+$skillDir  = Join-Path $codexHome 'skills\patrol-scaffold'
+
 # 新装：从发布归档（或 skill-installer / 直接拷目录，三种等价）
 Expand-Archive -LiteralPath patrol-scaffold-0.2.0.zip -DestinationPath $env:TEMP\rel
-Copy-Item -Recurse -Force $env:TEMP\rel\patrol-scaffold-0.2.0 "$env:CODEX_HOME\skills\patrol-scaffold"
+Copy-Item -Recurse -Force $env:TEMP\rel\patrol-scaffold-0.2.0 $skillDir
 
 # 装完先证「装对了」：安装目录 vs 本仓 HEAD 逐文件 SHA256
 #   （缺文件 / 内容漂移 / BOM / 多余源码文件 / 不可读 → exit 1 并点名；运行时产物不算漂移也不删）
-pwsh -NoProfile -File tests/verify-install-drift.ps1 -InstalledPath "$env:CODEX_HOME\skills\patrol-scaffold"
+pwsh -NoProfile -File tests/verify-install-drift.ps1 -InstalledPath $skillDir
 
-# 升级：停触发器 -> 备份 state/patrol-state.json -> 只换代码文件 -> 跑 dry-run -> 再跑一次上面那条
+# 报红不用手抠：按 HEAD 字节补齐/覆盖（只写不删，运行态与本地扩展不碰），再跑上面那条复核
+pwsh -NoProfile -File scripts/sync-install.ps1 -InstalledPath $skillDir -DryRun
+pwsh -NoProfile -File scripts/sync-install.ps1 -InstalledPath $skillDir
+
+# 升级：停触发器 -> 备份 state/patrol-state.json -> sync-install -> 跑 dry-run -> 再跑一次上面那条
 #       state/ downloads/ reports/ memory/ 与仓外配置不属于发布物，不要覆盖
 
 # 打包（产物落 %TEMP%，不入仓；脚本自带归档自证）

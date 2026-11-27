@@ -46,11 +46,18 @@ pwsh -NoProfile -File tests/verify-no-secrets.ps1
 pwsh -NoProfile -File tests/verify-state-externalization.ps1
 ```
 
-外加安装漂移自检（自证段进 CI；给了 `-InstalledPath` 就是对本机安装的实检，见 §3.1）：
+外加安装漂移自检（自证段进 CI；给了 `-InstalledPath` 就是对本机安装的实检，见 §3.1）。
+先把 skill 目录解析一次——**`CODEX_HOME` 未设时默认 `~/.codex`**（Windows = `C:\Users\<you>\.codex`）。
+直接写 `"$env:CODEX_HOME\skills\patrol-scaffold"` 的写法在未设 `CODEX_HOME` 的机器上会展开成
+`\skills\patrol-scaffold`，自检随即 `exit 2 — 安装目录不存在或不是目录`：那是路径没解析，不是装错了
+（本机 2026-11-28 实测）。下文 §3 / §4 的命令都沿用这两个变量：
 
 ```powershell
-pwsh -NoProfile -File tests/verify-install-drift.ps1                                          # 只跑自证段
-pwsh -NoProfile -File tests/verify-install-drift.ps1 -InstalledPath "$env:CODEX_HOME\skills\patrol-scaffold"   # 实检
+$codexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $HOME '.codex' }
+$skillDir  = Join-Path $codexHome 'skills\patrol-scaffold'
+
+pwsh -NoProfile -File tests/verify-install-drift.ps1                     # 只跑自证段
+pwsh -NoProfile -File tests/verify-install-drift.ps1 -InstalledPath $skillDir   # 实检本机安装
 ```
 
 外加 bitable 只读实跑闸门（默认走离线路径：CI 跑的就是它，缺凭据只 SKIP 不判红）：
@@ -180,15 +187,15 @@ sidecar %TEMP%\patrol-scaffold-release\patrol-scaffold-0.2.0.zip.sha256
 三种方式，产物都是同一个目录树，没有依赖安装步骤。
 
 ```powershell
-# 方式一：从发布归档（推荐给外部使用者）
+# 方式一：从发布归档（推荐给外部使用者）——$skillDir 先用 §1 那两行解析
 Expand-Archive -LiteralPath patrol-scaffold-0.2.0.zip -DestinationPath $env:TEMP\rel
-Copy-Item -Recurse -Force $env:TEMP\rel\patrol-scaffold-0.2.0 "$env:CODEX_HOME\skills\patrol-scaffold"
+Copy-Item -Recurse -Force $env:TEMP\rel\patrol-scaffold-0.2.0 $skillDir
 
 # 方式二：skill-installer 从本仓安装（推荐给本机开发者）
 #   调用 skill-installer skill，传入本 repo 路径
 
 # 方式三：直接拷目录
-#   把本目录拷到 $CODEX_HOME/skills/patrol-scaffold/
+#   把本目录拷到 $skillDir（= CODEX_HOME 或 ~/.codex 下的 skills/patrol-scaffold）
 ```
 
 安装后先跑 §1.2 的 dry-run：`due=3/3` 才算装好。跑不通先查 pwsh 7 与路径，不要先读架构。
@@ -202,8 +209,23 @@ Copy-Item -Recurse -Force $env:TEMP\rel\patrol-scaffold-0.2.0 "$env:CODEX_HOME\s
 拷进 skill 目录，都不会自己报错。用下面这条命令把它变成会红的事实：
 
 ```powershell
-pwsh -NoProfile -File <repo>\tests\verify-install-drift.ps1 `
-  -RepoRoot <repo> -InstalledPath "$env:CODEX_HOME\skills\patrol-scaffold"
+pwsh -NoProfile -File <repo>\tests\verify-install-drift.ps1 -RepoRoot <repo> -InstalledPath $skillDir
+```
+
+报红时不用手抠：`scripts/sync-install.ps1` 把 HEAD 受控文件**按字节**补齐/覆盖（基准是 HEAD blob，
+只写不删，运行时产物与本地扩展一律不碰），写完再跑上面这条复核：
+
+```powershell
+pwsh -NoProfile -File <repo>\scripts\sync-install.ps1 -InstalledPath $skillDir -DryRun   # 先看会写哪些
+pwsh -NoProfile -File <repo>\scripts\sync-install.ps1 -InstalledPath $skillDir           # 落地
+```
+
+同步器自己也有行为闸门（在 %TEMP% 里现造仓，不碰本机安装目录）：干净副本不重写、`-DryRun` 不落盘、
+漂移副本只写 3 个、同步后 drift 复核 `missing/content/bom=0`、运行时产物与本地扩展不删、连跑两次幂等、
+目录占位 `exit 1`、环境错误 `exit 2`：
+
+```powershell
+pwsh -NoProfile -File <repo>\tests\verify-install-sync.ps1
 ```
 
 - **PASS 判定**：`summary checked=<N> ok=<N> fail=0` + `RESULT: PASS`（`N` = HEAD 受控文件数，0.2.0 为 66；
@@ -247,6 +269,9 @@ Copy-Item <skill-dir>\state\patrol-state.json <备份目录>\patrol-state-<日�
 
 # 3) 用新版本替换代码文件，保留运行态 / 产出 / 记忆库
 #    不要整目录覆盖：state/ downloads/ reports/ memory/ 与仓外配置都不属于发布物
+#    推荐：按 HEAD 字节同步（只写不删；-DryRun 先看清单）
+pwsh -NoProfile -File <repo>\scripts\sync-install.ps1 -InstalledPath $skillDir -DryRun
+pwsh -NoProfile -File <repo>\scripts\sync-install.ps1 -InstalledPath $skillDir
 
 # 4) 校验版本与门禁
 Get-Content <skill-dir>\VERSION
@@ -265,7 +290,7 @@ pwsh -NoProfile -File <repo>\tests\verify-install-drift.ps1 `
   `git archive` / `git checkout` 取出来是 CRLF，整包拷进安装目录后自检会一次性报几十条
   `content … 仅换行符不同`——那不是安装错了，是拷贝方式改了字节。要么用不改换行符的方式
   （`git -c core.autocrlf=false -c core.eol=lf archive …` 后解包，或直接解发布 zip），要么就当成
-  真漂移逐文件用 HEAD 字节覆盖。
+  真漂移交给 `scripts/sync-install.ps1` 按 HEAD 字节重写一遍（换行符差异也就一并消了，不必逐个手抠）。
 
 - **`state/patrol-state.json` 兼容性**：本版只存 `id` / `lastRun` / 阶段字段，键集合未变即可直接用；
   若某版改了状态文件形状，`CHANGELOG.md` 的 Changed 节会写明迁移方式（本版无需迁移）。

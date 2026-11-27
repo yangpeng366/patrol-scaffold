@@ -215,6 +215,7 @@ pwsh -NoProfile -File tests/verify-no-secrets.ps1               # 密钥卫生 p
 pwsh -NoProfile -File tests/verify-secret-history.ps1           # git 历史里的密钥 hits=0
 pwsh -NoProfile -File tests/verify-gate-claim-counts.ps1         # 六道闸门断言数对拍（文档 pass=N vs 实测）
 pwsh -NoProfile -File tests/verify-install-drift.ps1            # 安装漂移（含坏样本自证）
+pwsh -NoProfile -File tests/verify-install-sync.ps1              # 安装同步器（写安装目录）行为自证
 ```
 
 跨仓那两道要兄弟仓 `dsh-patrol` 检出后才真跑，否则是 SKIP（不等于检查过了）：`tests/verify-item-contract-parity.ps1`、`tests/verify-item-parity-e2e.ps1`（后者还要 Node ≥ 22.6）。中文断言的两条先 `chcp 65001`（见 §4）。

@@ -34,8 +34,10 @@
       # 1b) 在已安装 skill 目录里跑自证（副本不是 git 仓，没有 HEAD 可比，只能来自证段）
       pwsh -NoProfile -File <skill-dir>\tests\verify-install-drift.ps1
 
-      # 2) 实检本机已安装 skill
-      pwsh -NoProfile -File tests/verify-install-drift.ps1 -InstalledPath "$env:CODEX_HOME\skills\patrol-scaffold"
+      # 2) 实检本机已安装 skill（CODEX_HOME 未设时默认 ~/.codex；别直接写 "$env:CODEX_HOME\skills\..."——
+      #    未设时会展开成 \skills\... 并因「安装目录不存在」exit 2，本机 2026-11-28 实测）
+      $codexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $HOME '.codex' }
+      pwsh -NoProfile -File tests/verify-install-drift.ps1 -InstalledPath (Join-Path $codexHome 'skills\patrol-scaffold')
 
       # 3) 只查清单里的子集（例如平台相关文件不参与比对）
       pwsh -NoProfile -File tests/verify-install-drift.ps1 -InstalledPath <dir> -ManifestFile .\drift-manifest.txt
