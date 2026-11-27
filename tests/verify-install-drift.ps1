@@ -219,6 +219,8 @@ function Invoke-InstallDriftCheck {
     $manifestSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     $checked = 0
     $excluded = 0
+    # 只有「受控文件」参与 ok 计数：extra 是清单外的多出文件，不该把 ok 拉成负数
+    $checkedPaths = [System.Collections.Generic.List[string]]::new()
 
     foreach ($entry in $entries) {
         $rel = $entry.Path
@@ -227,6 +229,7 @@ function Invoke-InstallDriftCheck {
 
         if (Test-ExcludedPath -Rel $rel) { $excluded++; continue }
         $checked++
+        $checkedPaths.Add($rel)
 
         $full = Join-Path $installFull ($rel -replace '/', '\')
         if (-not [System.IO.File]::Exists($full)) {
@@ -302,8 +305,16 @@ function Invoke-InstallDriftCheck {
     $counts = [ordered]@{ missing = 0; 'not-a-file' = 0; content = 0; bom = 0; extra = 0; unreadable = 0 }
     foreach ($f in $findings) { $counts[$f.Kind] = [int]$counts[$f.Kind] + 1 }
 
+    # ok 的口径是「受控文件里没被点名的个数」：0.2.0 受控 66 个、多出 2 个本地扩展时
+    # 旧实现用 checked-failings 会打印 ok=-2，读起来像自检自己算错了
+    $failedPaths = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($f in $findings) { [void]$failedPaths.Add($f.Path) }
+    $okFiles = 0
+    foreach ($rel in $checkedPaths) { if (-not $failedPaths.Contains($rel)) { $okFiles++ } }
+
     return [pscustomobject]@{
         Checked  = $checked
+        OkFiles  = $okFiles
         Excluded = $excluded
         Findings = @($findings)
         Counts   = $counts
@@ -319,7 +330,7 @@ function Write-DriftReport {
     }
     $c = $Result.Counts
     Write-Host ("summary checked={0} ok={1} fail={2} missing={3} not-a-file={4} content={5} bom={6} extra={7} unreadable={8} excluded={9}" -f `
-            $Result.Checked, ($Result.Checked - ($Result.Findings.Count)), $Result.Findings.Count, `
+            $Result.Checked, $Result.OkFiles, $Result.Findings.Count, `
             $c['missing'], $c['not-a-file'], $c['content'], $c['bom'], $c['extra'], $c['unreadable'], $Result.Excluded)
     if ($Result.Findings.Count -gt 0) {
         Write-Host ("安装目录：{0}" -f $InstalledPath)
@@ -437,6 +448,12 @@ function Invoke-DriftSelfTest {
     $r = Invoke-InstallDriftCheck -RepoRoot $repo -InstalledPath $polluted -Quiet
     $hit = @($r.Findings | Where-Object { $_.Kind -eq 'extra' -and $_.Path -eq 'scripts/rogue.ps1' })
     Assert-DriftSelfTest 'e) 多余源码文件 FAIL 且点名文件' ((-not $r.Ok) -and $hit.Count -eq 1) (Get-FindingDetail $r)
+
+    # e2) extra 不是受控文件：多出文件时 ok 必须仍等于受控数，不许出现负数的 ok
+    #    （旧实现用 checked-findings 算 ok，0.2.0 实装 66 + 2 个本地扩展会打印 ok=-2）
+    Assert-DriftSelfTest 'e2) extra 不让 ok 变负（ok 只数受控文件）' `
+        ($r.OkFiles -eq $seed.Count -and $r.OkFiles -ge 0 -and $r.Checked -eq $seed.Count) `
+        ("checked={0} ok={1} fail={2}" -f $r.Checked, $r.OkFiles, $r.Findings.Count)
 
     # f) BOM：内容相同但多了 UTF-8 BOM，必须报 bom 而不是含糊的 content
     $bomCopy = New-InstallCopy 'f-bom'

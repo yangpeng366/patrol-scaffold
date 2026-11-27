@@ -204,6 +204,13 @@
   行在解析阶段就变成 60 分钟一轮（静默降频），且与 dsh 的 `normalizeItem`（保留 0）不同形。
   现在解析层如实保留 `0`，调度层也不再回退（`0` / 空 / 负数 = 停跑），全链路一个口径。
 
+- **`verify-install-drift.ps1` 的 `ok=` 不再可能为负**。原实现用 `checked - findings.Count` 算 `ok`，
+  而 `extra`（清单外多出的本地扩展）不在 `checked` 里，于是「受控 66 个 + 2 个本地扩展」的真实场景
+  会打印 `checked=66 ok=-2 fail=68`——数字自相矛盾，读起来像自检自己算错了。现在 `ok` 的口径是
+  「受控文件里没被点名的个数」（新增 `OkFiles` 字段），本机实测同一场景为
+  `checked=66 ok=0 fail=68 missing=18 content=48 extra=2`。自证加一条
+  `e2) extra 不让 ok 变负`，总数 16 → 17，`README.md` 与 `docs/releasing.md` §3.1 的散文数同步。
+
 ## [0.2.0] - 2026-11-11
 
 主题：**把「换数据源」从文档承诺变成有闸门的能力**。本版新增契约层、声明式注册、两个离线 provider

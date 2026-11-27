@@ -302,7 +302,7 @@ pwsh -NoProfile -File scripts/build-release.ps1 -IncludeUntracked
 - `tests/verify-scan-scope-selfproof.ps1` — 扫描面收口自证（19 条断言）：`%TEMP%` 现造 git 仓 + gitignored 漂移样本，两道口径闸门各跑默认必绿 / `-IncludeLocalExtensions` 必红 / 提为受控后必红
 - `tests/verify-gate-claim-counts.ps1` — 断言数机器对拍：子进程真跑上面三道闸门取 `summary pass=N`（必须 `exit 0` + `fail=0`），再扫 AGENTS / README / SKILL / docs / references 里给它们写的断言数（`pass=N` / `N 条断言`），不等即点名 `file:line` 判红；带「陈旧数字必红 / 正确必绿 / 结果行归属 / 前导注释归属 / 兄弟闸门不串味」成对自证，`CHANGELOG.md` 作为发布历史不参与对拍
 - `tests/verify-provider-isolation.ps1` — 多 provider 同进程同名函数不串味（装配层回归）
-- `tests/verify-install-drift.ps1` — **安装漂移门禁**：已安装 skill 与仓库 HEAD 逐文件 SHA256（缺文件 / 内容漂移 / BOM / 多余源码文件 / 不可读均 `exit 1` 并点名；`downloads/` `memory/` `notify.log` 等运行时产物不误报也不删除）；带 16 条自证，装完 / 升完跑一次
+- `tests/verify-install-drift.ps1` — **安装漂移门禁**：已安装 skill 与仓库 HEAD 逐文件 SHA256（缺文件 / 内容漂移 / BOM / 多余源码文件 / 不可读均 `exit 1` 并点名；`downloads/` `memory/` `notify.log` 等运行时产物不误报也不删除）；带 17 条自证，装完 / 升完跑一次
 - `tests/verify-secret-history.ps1` — 历史密钥盘点：只报告命中提交，不改历史
 - `.githooks/pre-commit` — 把门禁挂到提交前：`git config core.hooksPath .githooks`
 - `.github/workflows/verify.yml` — CI（windows-latest / shell: pwsh）：描述文件规格漂移 + 全 provider 契约自测 + 跨仓 item 契约同源（静态 schema + 动态解析对拍）+ csv-file 离线自测 + command 离线自测 + 停跑调度语义 + 回写层预览/幂等自测 + 两道口径散文闸门（双门 / `interval=0`）+ 扫描面收口自证 + 安装漂移自检 + 提示词决策层自测 + bitable 只读实跑闸门（默认 SKIP，缺凭据不判红）+ 密钥卫生 + 发布归档自证（归档落 `RUNNER_TEMP`，不进工作树）
